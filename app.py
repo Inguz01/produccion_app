@@ -180,58 +180,81 @@ if menu == "Registrar Ficha Técnica" and rol == "Administrador":
         fichas = pd.concat([fichas, nueva_ficha], ignore_index=True)
         fichas.to_csv(fichas_path, index=False)
         st.success(f"Ficha técnica {referencia} {nueva_version} guardada correctamente.")
+        
+# ==== Visualizar Ficha Técnica con diseño mejorado ====
+elif menu == "Visualizar Ficha Técnica":
+    st.header("📁 Visualización de Fichas Técnicas")
 
-# =======================
-# VISUALIZAR FICHA TÉCNICA
-# =======================
-if menu == "Visualizar Ficha Técnica":
-    st.header("📂 Visualización de Fichas Técnicas")
-    try:
-        fichas = pd.read_csv("datos/fichas_tecnicas.csv")
-        referencias = fichas["Referencia"].unique().tolist()
-        referencia_sel = st.selectbox("Selecciona una referencia", referencias)
+    fichas_path = "datos/fichas_tecnicas.csv"
+    if not os.path.exists(fichas_path):
+        st.warning("No hay fichas técnicas registradas.")
+    else:
+        fichas = pd.read_csv(fichas_path)
 
-        if rol == "Administrador":
-            versiones = fichas[fichas["Referencia"] == referencia_sel]["Versión"].tolist()
-            version_sel = st.selectbox("Selecciona una versión", versiones)
-            ficha = fichas[(fichas["Referencia"] == referencia_sel) & (fichas["Versión"] == version_sel)].iloc[0]
+        if fichas.empty:
+            st.warning("No hay fichas registradas.")
         else:
-            ficha = fichas[fichas["Referencia"] == referencia_sel].sort_values("Versión", ascending=False).iloc[-1]
+            clientes = fichas["Cliente"].unique().tolist()
+            cliente_sel = st.selectbox("Selecciona un cliente", clientes)
 
-        st.subheader(f"📘 Ficha Técnica - {ficha['Referencia']} {ficha['Versión']}")
-        st.markdown(
-            f"**Cliente:** {ficha['Cliente']}  \n"
-            f"**Fecha:** {ficha['Fecha']}  \n"
-            f"**Color:** {ficha['Color']}  \n"
-            f"**Fórmula:** {ficha['Fórmula']}"
-        )
-        st.markdown(
-            f"**Dureza:** {ficha['Dureza']}  \n"
-            f"**Presión:** {ficha['Presión']}  \n"
-            f"**Temperatura:** {ficha['Temperatura']}  \n"
-            f"**Peso:** {ficha['Peso']} gr  \n"
-            f"**Cavidades:** {ficha['Cavidades']}"
-        )
-        st.markdown(
-            f"**Tacado:** {ficha['Tacado']} min  \n"
-            f"**Vulcanizado:** {ficha['Vulcanizado']} min  \n"
-            f"**Total:** {ficha['TiempoTotal']} min"
-        )
-        st.markdown(
-            f"**Promedio Hora:** {ficha['PromedioHora']:.2f} uds  \n"
-            f"**Corte por unidad:** {ficha['TiempoCorteUnidad']} min"
-        )
-        st.markdown(
-            f"**Corte por hora:** {ficha['CorteHora']:.2f} uds  \n"
-            f"**Corte diario:** {ficha['CorteDiario']:.2f} uds"
-        )
+            fichas_cliente = fichas[fichas["Cliente"] == cliente_sel]
+            referencias = fichas_cliente["Referencia"].unique().tolist()
+            referencia_sel = st.selectbox("Selecciona una referencia", referencias)
 
-        if ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
-            st.image(f"datos/{ficha['Imagen']}", caption="Imagen del producto", width=300)
+            # Filtrar por referencia y mostrar última versión
+            ficha = fichas_cliente[fichas_cliente["Referencia"] == referencia_sel]
+            ficha = ficha.sort_values("Versión", ascending=False).iloc[0]
 
-        st.subheader("📝 Observaciones")
-        st.write(ficha["Observaciones"])
+            # ENCABEZADO
+            st.markdown("---")
+            col1, col2 = st.columns([1, 5])
+            with col1:
+                st.image("https://i.imgur.com/9GU0T8B.png", width=100)  # Reemplaza con tu logo si es local
+            with col2:
+                st.markdown("## FICHA TÉCNICA DE PRODUCTO")
+                st.markdown(f"**Versión:** {ficha['Versión']} | **Código ficha:** FTP-{ficha.name:03d}")
 
-    except Exception as e:
-        st.warning("No hay fichas registradas.")
-        st.text(str(e))
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            col1.markdown(f"**📅 Fecha:** {ficha['Fecha']}")
+            col2.markdown(f"**🏢 Cliente:** {ficha['Cliente']}")
+            col3.markdown(f"**🧪 Fórmula:** {ficha['Fórmula']}")
+
+            st.markdown("---")
+            st.markdown("### 📦 Especificaciones del Producto")
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                if ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
+                    st.image(f"datos/{ficha['Imagen']}", caption="Imagen del producto", width=200)
+            with col2:
+                st.markdown(f"**Referencia:** {ficha['Referencia']}")
+                st.markdown(f"**Color:** {ficha['Color']}")
+                st.markdown(f"**Laminado:** {ficha['Laminado']} mm")
+                st.markdown(f"**Peso:** {ficha['Peso']} gr")
+                st.markdown(f"**Dureza:** {ficha['Dureza']}")
+                st.markdown(f"**Cavidades:** {ficha['Cavidades']}")
+
+            st.markdown("---")
+            st.markdown("### ⚙️ Especificaciones del Proceso")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Temperatura:** {ficha['Temperatura']}")
+                st.markdown(f"**Presión:** {ficha['Presión']}")
+                st.markdown(f"**Vulcanizado:** {ficha['Vulcanizado']} min")
+            with col2:
+                st.markdown(f"**Tacado:** {ficha['Tacado']} min")
+                st.markdown(f"**Tiempo Total:** {ficha['TiempoTotal']} min")
+                st.markdown(f"**Promedio por Hora:** {ficha['PromedioHora']:.2f} uds")
+
+            st.markdown("---")
+            st.markdown("### ✂️ Datos de Corte")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Tiempo por unidad:** {ficha['TiempoCorteUnidad']} min")
+            with col2:
+                st.markdown(f"**Corte por Hora:** {ficha['CorteHora']:.2f} uds")
+                st.markdown(f"**Corte diario estimado:** {ficha['CorteDiario']:.2f} uds")
+
+            st.markdown("---")
+            st.markdown("### 📝 Observaciones")
+            st.write(ficha["Observaciones"])
