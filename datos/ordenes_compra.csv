@@ -1,10 +1,11 @@
 ID_Orden,Cliente,Fecha_Recepcion,Estado
-OC-0001,Industria de Estufas Continental S.A,2025-06-20,Recibida
-OC-0002,Industria de Estufas Continental S.A,2025-06-20,Recibida
-OC-0003,Industria de Estufas Continental S.A,2025-06-20,Recibida
-OC-0004,Grupo North,2025-06-20,Recibida
-OC-0005,Grupo North,2025-06-20,Recibida
-OC-0006,Grupo North,2025-06-20,Recibida
-OC-0007,Industria de Estufas Continental S.A,2025-06-20,Recibida
-OC-0008,Industria de Estufas Continental S.A,2025-06-20,Recibida
-OC-0009,Industria de Estufas Continental S.A,2025-06-20,Recibida
+OC-0001,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0002,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0003,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0004,Grupo North,2025-06-20,Pendiente
+OC-0005,Grupo North,2025-06-20,Pendiente
+OC-0006,Grupo North,2025-06-20,Pendiente
+OC-0007,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0008,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0009,Industria de Estufas Continental S.A,2025-06-20,Pendiente
+OC-0010,Industria de Estufas Continental S.A,2025-06-20,Pendiente

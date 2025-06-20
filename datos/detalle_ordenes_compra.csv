@@ -1,2 +1,4 @@
-ID_Orden,Referencia,Cantidad,Fecha_Entrega,Precio_Unitario
-OC-0009,Empaque Perfil Silicona Cuadrado,3,2025-06-28,10.0
+ID_Orden,Referencia,Cantidad,Fecha_Entrega,Precio_Unitario,Producido
+OC-0009,Empaque Perfil Silicona Cuadrado,3,2025-06-28,10.0,0
+OC-0010,Empaque Perfil Silicona Cuadrado,1,2025-06-20,0.0,0
+OC-0010,Empaque Perfil Silicona Cuadrado,10,2025-06-27,100.0,0

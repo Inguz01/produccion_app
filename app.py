@@ -74,7 +74,9 @@ else:
     if st.session_state["rol"] == "Administrador":
         menu = st.sidebar.selectbox("Menú", ["Registrar Cliente", 
         "Registrar Ficha Técnica", 
-        "Visualizar Ficha Técnica", "Registrar Orden de Compra"])
+        "Visualizar Ficha Técnica", 
+        "Registrar Orden de Compra",
+        "Seguimiento de Órdenes"])
     else:
         menu = st.sidebar.selectbox("Menú", ["Visualizar Ficha Técnica"])
 
@@ -410,3 +412,82 @@ else:
             st.session_state["cliente_orden"] = ""
         elif not st.session_state["productos_temp"]:
             st.info("Agrega al menos un producto para registrar la orden.")
+
+# =======================
+# SEGUIMIENTO DE ORDEN DE COMPRA
+# =======================
+
+    elif menu == "Seguimiento de Órdenes":
+        st.header("📋 Seguimiento de Órdenes de Compra")
+
+        ordenes_path = "datos/ordenes_compra.csv"
+        detalles_path = "datos/detalle_ordenes_compra.csv"
+
+        if not os.path.exists(ordenes_path) or not os.path.exists(detalles_path):
+            st.warning("No hay órdenes registradas.")
+        else:
+            ordenes_df = pd.read_csv(ordenes_path)
+            detalles_df = pd.read_csv(detalles_path)
+
+            # Inicializar columna Producido si no existe
+            if "Producido" not in detalles_df.columns:
+                detalles_df["Producido"] = 0
+                detalles_df.to_csv(detalles_path, index=False)
+
+            # Recalcular estado de cada orden en función del progreso
+            for idx, orden in ordenes_df.iterrows():
+                productos = detalles_df[detalles_df["ID_Orden"] == orden["ID_Orden"]]
+
+                total_cantidad = productos["Cantidad"].sum()
+                total_producido = productos["Producido"].sum()
+
+                if total_producido == 0:
+                    estado_actual = "Pendiente"
+                elif total_producido < total_cantidad:
+                    estado_actual = "En Producción"
+                else:
+                    estado_actual = "Terminada"
+
+                ordenes_df.at[idx, "Estado"] = estado_actual
+
+            # Guardar cambios en archivo CSV
+            ordenes_df.to_csv(ordenes_path, index=False)
+
+
+
+            st.subheader("🔎 Filtro por estado")
+            estados = ordenes_df["Estado"].unique().tolist()
+            estado_filtro = st.selectbox("Selecciona un estado", ["Todos"] + estados)
+
+            if estado_filtro != "Todos":
+                ordenes_df = ordenes_df[ordenes_df["Estado"] == estado_filtro]
+
+            if ordenes_df.empty:
+                st.info("No hay órdenes con el estado seleccionado.")
+            else:
+                st.markdown("### 🧾 Órdenes encontradas")
+                for idx, orden in ordenes_df.iterrows():
+                    productos = detalles_df[detalles_df["ID_Orden"] == orden["ID_Orden"]]
+
+                    total_cantidad = productos["Cantidad"].sum()
+                    total_producido = productos["Producido"].sum()
+                    avance = total_producido / total_cantidad if total_cantidad > 0 else 0
+
+                    with st.expander(f"🧾 {orden['ID_Orden']} - {orden['Cliente']} ({avance*100:.1f}%)"):
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.markdown(f"**📅 Fecha recepción:** {orden['Fecha_Recepcion']}")
+                        col2.markdown(f"**📌 Estado:** {orden['Estado']}")
+                        col3.markdown(f"**🏢 Cliente:** {orden['Cliente']}")
+                        col4.progress(avance)
+
+                        st.markdown("#### 📦 Avance por referencia")
+                        for i, row in productos.iterrows():
+                            colr1, colr2, colr3 = st.columns([3, 2, 5])
+                            colr1.markdown(f"🔹 **{row['Referencia']}**")
+                            colr2.markdown(f"{int(row['Producido'])}/{int(row['Cantidad'])} unidades")
+                            progreso = row["Producido"] / row["Cantidad"] if row["Cantidad"] > 0 else 0
+                            colr3.progress(progreso, text=
+                                "✅ Completado" if progreso >= 1 else 
+                                "🔧 En proceso" if progreso > 0 else 
+                                "⏳ Pendiente"
+                            )
