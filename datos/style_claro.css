@@ -1,0 +1,67 @@
+/* Fondo general */
+body, .stApp {
+    background-color: #f9fafb;
+    color: #1f2937;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+/* Sidebar */
+.css-6qob1r, .css-1d391kg {
+    background-color: #e5e7eb !important;
+    color: #111827 !important;
+}
+
+/* Títulos */
+h1, h2, h3, h4 {
+    color: #111827;
+}
+
+/* Inputs */
+input, textarea, select {
+    background-color: #ffffff !important;
+    color: #1f2937 !important;
+    border: 1px solid #d1d5db;
+    border-radius: 5px;
+    padding: 6px;
+}
+
+/* Botones */
+.stButton>button {
+    background-color: #2563eb !important;
+    color: white !important;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-weight: 600;
+    border: none;
+}
+
+.stButton>button:hover {
+    background-color: #1d4ed8 !important;
+}
+
+/* Success y error */
+.stAlert-success {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.stAlert-error {
+    background-color: #fee2e2;
+    color: #b91c1c;
+}
+
+/* Tablas */
+thead tr th {
+    background-color: #f3f4f6;
+    color: #374151;
+}
+
+tbody tr td {
+    background-color: #ffffff;
+    color: #1f2937;
+}
+
+/* Textos destacados */
+.stMarkdown {
+    color: #1f2937;
+}

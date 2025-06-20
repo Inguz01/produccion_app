@@ -1,0 +1,60 @@
+/* Fondo general de la app */
+body, .stApp {
+    background-color: #0f172a;
+    color: #e2e8f0;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+/* Sidebar */
+.css-6qob1r, .css-1d391kg {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+}
+
+/* Títulos */
+h1, h2, h3, h4 {
+    color: #f1f5f9;
+}
+
+/* Inputs */
+input, textarea, select {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+    border: 1px solid #334155;
+    border-radius: 5px;
+}
+
+/* Botones */
+.stButton>button {
+    background-color: #3b82f6 !important;
+    color: white !important;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-weight: 600;
+}
+
+.stButton>button:hover {
+    background-color: #2563eb !important;
+}
+
+/* Success y error */
+.stAlert-success {
+    background-color: #22c55e;
+    color: white;
+}
+
+.stAlert-error {
+    background-color: #ef4444;
+    color: white;
+}
+
+/* Tabla */
+thead tr th {
+    background-color: #1e293b;
+    color: #f8fafc;
+}
+
+tbody tr td {
+    background-color: #0f172a;
+    color: #e2e8f0;
+}
