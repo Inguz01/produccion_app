@@ -72,7 +72,9 @@ else:
     
     # Menú según el rol
     if st.session_state["rol"] == "Administrador":
-        menu = st.sidebar.selectbox("Menú", ["Registrar Cliente", "Registrar Ficha Técnica", "Visualizar Ficha Técnica"])
+        menu = st.sidebar.selectbox("Menú", ["Registrar Cliente", 
+        "Registrar Ficha Técnica", 
+        "Visualizar Ficha Técnica", "Registrar Orden de Compra"])
     else:
         menu = st.sidebar.selectbox("Menú", ["Visualizar Ficha Técnica"])
 
@@ -272,3 +274,139 @@ else:
                 st.markdown("---")
                 st.markdown("### 📝 Observaciones")
                 st.write(ficha["Observaciones"])
+
+# =======================
+# REGISTRAR ORDEN DE COMPRA
+# =======================
+    if menu == "Registrar Orden de Compra" and st.session_state["rol"] == "Administrador":
+        st.header("📝 Registro de Orden de Compra")
+
+        # Archivos CSV
+        ordenes_path = "datos/ordenes_compra.csv"
+        detalles_path = "datos/detalle_ordenes_compra.csv"
+        fichas_path = "datos/fichas_tecnicas.csv"
+
+        # Cargar datos existentes
+        ordenes_df = pd.read_csv(ordenes_path) if os.path.exists(ordenes_path) else pd.DataFrame(columns=["ID_Orden", "Cliente", "Fecha_Recepcion", "Estado"])
+        detalles_df = pd.read_csv(detalles_path) if os.path.exists(detalles_path) else pd.DataFrame(columns=["ID_Orden", "Referencia", "Cantidad", "Fecha_Entrega", "Precio_Unitario"])
+        fichas_df = pd.read_csv(fichas_path) if os.path.exists(fichas_path) else pd.DataFrame()
+
+        # Generar nuevo ID de orden
+        nuevo_id = f"OC-{len(ordenes_df) + 1:04d}"
+
+        st.subheader("📋 Información General")
+        cliente = st.selectbox("Cliente", lista_clientes)
+
+        # Mantener cliente fijo una vez agregue productos
+        if "cliente_orden" not in st.session_state:
+            st.session_state["cliente_orden"] = cliente
+
+        if st.session_state.get("productos_temp") and cliente != st.session_state["cliente_orden"]:
+            st.warning("⚠️ No puedes cambiar el cliente una vez agregaste productos.")
+            cliente = st.session_state["cliente_orden"]
+
+        fecha_recepcion = st.date_input("Fecha de recepción", value=date.today())
+
+        # Inicializar almacenamiento temporal
+        if "productos_temp" not in st.session_state:
+            st.session_state["productos_temp"] = []
+
+        # Filtrar productos disponibles para ese cliente
+        referencias_disponibles = fichas_df[fichas_df["Cliente"] == cliente]["Referencia"].unique().tolist()
+
+        if not referencias_disponibles:
+            st.warning(f"⚠️ No hay productos registrados para el cliente **{cliente}**. Crea primero una ficha técnica.")
+            st.stop()
+
+        with st.form("form_producto"):
+            col1, col2, col3, col4 = st.columns([3, 2, 3, 2])
+            with col1:
+                referencia = st.selectbox("Referencia", referencias_disponibles, key="ref")
+            with col2:
+                cantidad = st.number_input("Cantidad", min_value=1, key="cant")
+            with col3:
+                fecha_entrega = st.date_input("Fecha de entrega", key="fecha_entrega")
+            with col4:
+                precio_unitario = st.number_input("Precio unitario", min_value=0.0, step=0.01, key="precio")
+
+            agregar = st.form_submit_button("➕ Agregar producto")
+            if agregar:
+                st.session_state["productos_temp"].append({
+                    "ID_Orden": nuevo_id,
+                    "Referencia": referencia,
+                    "Cantidad": cantidad,
+                    "Fecha_Entrega": fecha_entrega,
+                    "Precio_Unitario": precio_unitario
+                })
+                st.success(f"✅ Producto {referencia} agregado")
+                st.session_state["cliente_orden"] = cliente
+                st.rerun()
+
+# Mostrar productos agregados
+        if st.session_state["productos_temp"]:
+            st.markdown("### 📦 Productos en esta orden")
+
+            # Estilo CSS para tabla y botón
+            st.markdown("""
+                <style>
+                .btn-small {
+                    padding: 6px 10px;
+                    font-size: 14px;
+                    background-color: #3b82f6;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .btn-small:hover {
+                    background-color: #2563eb;
+                }
+                </style>
+            """, unsafe_allow_html=True)
+
+            # Mostrar encabezado con columnas
+            cols = st.columns([3, 1, 2, 2, 1])
+            cols[0].markdown("**Referencia**")
+            cols[1].markdown("**Cantidad**")
+            cols[2].markdown("**Fecha de Entrega**")
+            cols[3].markdown("**Precio Unitario**")
+            cols[4].markdown("**Eliminar**")
+
+            for i, producto in enumerate(st.session_state["productos_temp"]):
+                cols = st.columns([3, 1, 2, 2, 1])
+                cols[0].markdown(producto["Referencia"])
+                cols[1].markdown(str(producto["Cantidad"]))
+                cols[2].markdown(str(producto["Fecha_Entrega"]))
+                cols[3].markdown(f"${producto['Precio_Unitario']:.2f}")
+                if cols[4].button("🗑️", key=f"eliminar_{i}"):
+                    st.session_state["productos_temp"].pop(i)
+                    st.rerun()
+
+            # Botón para limpiar toda la lista
+            if st.button("🧹 Limpiar productos"):
+                st.session_state["productos_temp"] = []
+                st.rerun()
+
+
+        # Registrar orden (solo si hay productos)
+        if st.button("✅ Registrar Orden de Compra") and st.session_state["productos_temp"]:
+            nueva_orden = pd.DataFrame([{
+                "ID_Orden": nuevo_id,
+                "Cliente": cliente,
+                "Fecha_Recepcion": fecha_recepcion,
+                "Estado": "Recibida"
+            }])
+            nuevos_detalles = pd.DataFrame(st.session_state["productos_temp"])
+
+            # Guardar
+            ordenes_df = pd.concat([ordenes_df, nueva_orden], ignore_index=True)
+            detalles_df = pd.concat([detalles_df, nuevos_detalles], ignore_index=True)
+
+            ordenes_df.to_csv(ordenes_path, index=False)
+            detalles_df.to_csv(detalles_path, index=False)
+
+            st.success(f"Orden de compra **{nuevo_id}** registrada exitosamente.")
+            st.session_state["productos_temp"] = []
+            st.session_state["cliente_orden"] = ""
+        elif not st.session_state["productos_temp"]:
+            st.info("Agrega al menos un producto para registrar la orden.")
