@@ -352,15 +352,17 @@ else:
         fichas_path = "datos/fichas_tecnicas.csv"
 
         # Cargar datos existentes
-        ordenes_df = pd.read_csv(ordenes_path) if os.path.exists(ordenes_path) else pd.DataFrame(columns=["ID_Orden", "Cliente", "Fecha_Recepcion", "Estado"])
+        ordenes_df = pd.read_csv(ordenes_path) if os.path.exists(ordenes_path) else pd.DataFrame(columns=["ID_Orden", "Numero_OC_Cliente", "Cliente", "Fecha_Recepcion", "Estado"])
         detalles_df = pd.read_csv(detalles_path) if os.path.exists(detalles_path) else pd.DataFrame(columns=["ID_Orden", "Referencia", "Cantidad", "Fecha_Entrega", "Precio_Unitario"])
         fichas_df = pd.read_csv(fichas_path) if os.path.exists(fichas_path) else pd.DataFrame()
 
         # Generar nuevo ID de orden
-        nuevo_id = f"OC-{len(ordenes_df) + 1:04d}"
+        nuevo_id = int(ordenes_df["ID_Orden"].max()) + 1 if not ordenes_df.empty else 1
 
         st.subheader("📋 Información General")
         cliente = st.selectbox("Cliente", lista_clientes)
+        numero_oc_cliente = st.text_input("Número de Orden de Compra (Cliente)")
+
 
         # Mantener cliente fijo una vez agregue productos
         if "cliente_orden" not in st.session_state:
@@ -457,6 +459,7 @@ else:
         if st.button("✅ Registrar Orden de Compra") and st.session_state["productos_temp"]:
             nueva_orden = pd.DataFrame([{
                 "ID_Orden": nuevo_id,
+                "Numero_OC_Cliente": numero_oc_cliente,
                 "Cliente": cliente,
                 "Fecha_Recepcion": fecha_recepcion,
                 "Estado": "Recibida"
@@ -546,14 +549,20 @@ else:
                         st.markdown("#### 📦 Avance por referencia")
                         for i, row in productos.iterrows():
                             colr1, colr2, colr3 = st.columns([3, 2, 5])
-                            colr1.markdown(f"🔹 **{row['Referencia']}**")
-                            colr2.markdown(f"{int(row['Producido'])}/{int(row['Cantidad'])} unidades")
-                            progreso = row["Producido"] / row["Cantidad"] if row["Cantidad"] > 0 else 0
-                            colr3.progress(progreso, text=
-                                "✅ Completado" if progreso >= 1 else 
-                                "🔧 En proceso" if progreso > 0 else 
-                                "⏳ Pendiente"
-                            )
+
+                            referencia = row['Referencia']
+                            producido = row['Producido'] if pd.notna(row['Producido']) else 0
+                            cantidad = row['Cantidad'] if pd.notna(row['Cantidad']) else 0
+
+                            # Calcular progreso con protección total
+                            progreso = (producido / cantidad * 100) if cantidad > 0 else 0
+                            progreso_valido = progreso / 100  # Streamlit espera 0.0 - 1.0
+
+                            colr1.markdown(f"🔹 **{referencia}**")
+                            colr2.markdown(f"{int(producido)}/{int(cantidad)} unidades")
+                            colr3.progress(progreso_valido, text=f"{progreso:.1f}% completado")
+
+                            
 # ========================
 # REGISTRAR ORDEN DE PRODUCCIÓN
 # ========================
