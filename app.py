@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
+import streamlit.components.v1 as components
 from datetime import date
+
 
 # Crear carpeta de datos si no existe
 if not os.path.exists("datos"):
@@ -103,29 +106,163 @@ else:
                                             "Contacto1", "Correo1", "Contacto2", "Correo2"])
         lista_clientes = []
 
-    # =======================
-    # REGISTRAR CLIENTE
-    # =======================
+# =======================
+# GESTIÓN DE CLIENTES
+# =======================
+
     if menu == "Registrar Cliente" and st.session_state["rol"] == "Administrador":
-        st.header("🧾 Registro de Cliente")
-        with st.form("cliente_form"):
-            nombre = st.text_input("Nombre del cliente")
-            nit = st.text_input("NIT")
-            direccion = st.text_input("Dirección")
-            telefono = st.text_input("Teléfono")
-            correo = st.text_input("Correo empresa")
-            contacto1 = st.text_input("Contacto 1")
-            correo1 = st.text_input("Correo contacto 1")
-            contacto2 = st.text_input("Contacto 2")
-            correo2 = st.text_input("Correo contacto 2")
-            submitted = st.form_submit_button("Guardar Cliente")
-        if submitted:
-            nuevo_cliente = pd.DataFrame([[nombre, nit, direccion, telefono, correo,
-                                            contacto1, correo1, contacto2, correo2]],
-                                            columns=clientes_df.columns)
-            clientes_df = pd.concat([clientes_df, nuevo_cliente], ignore_index=True)
-            clientes_df.to_csv(clientes_csv_path, index=False)
-            st.success(f"Cliente '{nombre}' guardado correctamente.")
+        st.header("📋 Gestión de Clientes")
+
+        clientes_csv_path = "datos/clientes.csv"
+        columnas_requeridas = ["Cliente", "NIT", "Dirección", "Teléfono", "Correo",
+                                "Contacto1", "Correo1", "Contacto2", "Correo2"]
+
+        if os.path.exists(clientes_csv_path):
+            clientes_df = pd.read_csv(clientes_csv_path)
+            for col in columnas_requeridas:
+                if col not in clientes_df.columns:
+                    clientes_df[col] = ""
+        else:
+            clientes_df = pd.DataFrame(columns=columnas_requeridas)
+
+        # Estado de edición y eliminación
+        editar_nit = st.session_state.get("editar_nit", None)
+        eliminar_nit = st.session_state.get("eliminar_nit", None)
+
+        st.markdown("### 🔍 Buscar Cliente")
+        filtro_busqueda = st.text_input("Buscar por nombre o NIT")
+
+        st.markdown("### 📄 Clientes por página")
+        clientes_por_pagina = st.selectbox("Clientes por página", [10, 20, 50], index=0)
+
+        filtrado_df = clientes_df.copy()
+        if filtro_busqueda:
+            filtro = filtro_busqueda.lower()
+            filtrado_df = clientes_df[clientes_df.apply(lambda row:
+                filtro in str(row['Cliente']).lower() or filtro in str(row['NIT']), axis=1)]
+
+        total_paginas = (len(filtrado_df) - 1) // clientes_por_pagina + 1
+        pagina_actual = st.session_state.get("pagina_clientes", 1)
+        pagina_actual = max(1, min(pagina_actual, total_paginas))
+
+        start = (pagina_actual - 1) * clientes_por_pagina
+        end = start + clientes_por_pagina
+        pagina_df = filtrado_df.iloc[start:end]
+
+        st.markdown("### 🗂️ Lista de Clientes")
+        if not pagina_df.empty:
+            for i, row in pagina_df.iterrows():
+                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 2, 2, 2, 2, 2, 0.5, 0.5])
+                col1.write(row["Cliente"])
+                col2.write(row["NIT"])
+                col3.write(row["Dirección"])
+                col4.write(row["Teléfono"])
+                col5.write(row.get("Contacto1", ""))
+                col6.write(row.get("Correo1", ""))
+                if col7.button("✏️", key=f"editar_{row['NIT']}"):
+                    st.session_state["editar_nit"] = row["NIT"]
+                    st.session_state["mostrar_form"] = True
+                    st.rerun()
+                if col8.button("🗑️", key=f"eliminar_{row['NIT']}"):
+                    st.session_state["eliminar_nit"] = row["NIT"]
+                    st.rerun()
+        else:
+            st.info("No hay clientes registrados aún.")
+
+        colpag1, colpag2, colpag3 = st.columns([1, 2, 1])
+        with colpag1:
+            if st.button("⬅️ Anterior") and pagina_actual > 1:
+                st.session_state["pagina_clientes"] = pagina_actual - 1
+                st.rerun()
+        with colpag2:
+            st.markdown(f"**Página {pagina_actual} de {total_paginas}**")
+        with colpag3:
+            if st.button("Siguiente ➡️") and pagina_actual < total_paginas:
+                st.session_state["pagina_clientes"] = pagina_actual + 1
+                st.rerun()
+
+        # Confirmar eliminación
+        if eliminar_nit:
+            st.warning(f"¿Estás seguro de eliminar el cliente con NIT {eliminar_nit}?")
+            confirmar = st.checkbox("☑️ Confirmar eliminación")
+            if confirmar:
+                clientes_df = clientes_df[clientes_df["NIT"] != eliminar_nit]
+                clientes_df.to_csv(clientes_csv_path, index=False)
+                st.success(f"Cliente con NIT {eliminar_nit} eliminado correctamente.")
+                del st.session_state["eliminar_nit"]
+                st.rerun()
+
+        st.markdown("---")
+        if st.button("➕ Registrar Cliente"):
+            st.session_state["mostrar_form"] = True
+            st.session_state["editar_nit"] = None
+
+        if st.session_state.get("mostrar_form") or editar_nit:
+            st.subheader("🧾 Formulario Cliente")
+
+            if editar_nit:
+                cliente_filtrado = clientes_df[clientes_df["NIT"] == editar_nit]
+                if cliente_filtrado.empty:
+                    st.warning(f"⚠️ El cliente con NIT {editar_nit} ya no existe.")
+                    del st.session_state["editar_nit"]
+                    st.rerun()
+                else:
+                    cliente_editar = cliente_filtrado.iloc[0]
+            else:
+                cliente_editar = pd.Series({col: "" for col in clientes_df.columns})
+
+        
+
+            with st.form("form_cliente"):
+                nombre = st.text_input("Nombre del cliente", cliente_editar["Cliente"])
+                nit = st.text_input("NIT", str(cliente_editar["NIT"]))
+                direccion = st.text_input("Dirección", cliente_editar["Dirección"])
+                telefono = st.text_input("Teléfono", str(cliente_editar["Teléfono"]))
+                contacto1 = st.text_input("Contacto 1", cliente_editar["Contacto1"])
+                correo1 = st.text_input("Correo contacto 1", cliente_editar["Correo1"])
+                contacto2 = st.text_input("Contacto 2", cliente_editar["Contacto2"])
+                correo2 = st.text_input("Correo contacto 2", cliente_editar["Correo2"])
+                submitted = st.form_submit_button("💾 Guardar Cliente")
+
+                if submitted:
+                    if not all([nombre, nit, direccion, telefono, contacto1, correo1]):
+                        st.error("⚠️ Todos los campos excepto Contacto 2 y Correo 2 son obligatorios.")
+                    elif not nit.isdigit() or len(nit) != 10:
+                        st.error("⚠️ El NIT debe tener 10 dígitos numéricos.")
+                    elif not telefono.isdigit() or len(telefono) != 10:
+                        st.error("⚠️ El teléfono debe tener 10 dígitos numéricos.")
+                    elif "@" not in correo1 or "." not in correo1:
+                        st.error("⚠️ Correo 1 no es válido.")
+                    elif correo2 and ("@" not in correo2 or "." not in correo2):
+                        st.error("⚠️ Correo 2 no es válido.")
+                    elif nit in clientes_df["NIT"].astype(str).tolist() and nit != str(editar_nit):
+                        st.error("⚠️ Ya existe otro cliente registrado con ese NIT.")
+                    else:
+                        nuevo_cliente = pd.DataFrame([{
+                            "Cliente": nombre,
+                            "NIT": nit,
+                            "Dirección": direccion,
+                            "Teléfono": telefono,
+                            "Correo": "",  # Eliminado
+                            "Contacto1": contacto1,
+                            "Correo1": correo1,
+                            "Contacto2": contacto2,
+                            "Correo2": correo2
+                        }])
+
+                        if editar_nit:
+                            clientes_df.loc[clientes_df["NIT"] == editar_nit, :] = nuevo_cliente.values
+                            st.success("✅ Cliente actualizado correctamente.")
+                        else:
+                            clientes_df = pd.concat([clientes_df, nuevo_cliente], ignore_index=True)
+                            st.success("✅ Cliente registrado correctamente.")
+
+                        clientes_df.to_csv(clientes_csv_path, index=False)
+                        st.session_state["mostrar_form"] = False
+                        st.session_state["editar_nit"] = None
+                        st.rerun()
+
+
 
     # =======================
     # REGISTRAR FICHA TÉCNICA
