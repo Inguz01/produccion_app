@@ -211,8 +211,6 @@ else:
             else:
                 cliente_editar = pd.Series({col: "" for col in clientes_df.columns})
 
-        
-
             with st.form("form_cliente"):
                 nombre = st.text_input("Nombre del cliente", cliente_editar["Cliente"])
                 nit = st.text_input("NIT", str(cliente_editar["NIT"]))
@@ -260,13 +258,9 @@ else:
                         clientes_df.to_csv(clientes_csv_path, index=False)
                         st.session_state["mostrar_form"] = False
                         st.session_state["editar_nit"] = None
-                        st.rerun()
-
-
-
-    # =======================
-    # REGISTRAR FICHA TÉCNICA
-    # =======================
+                        st.experimental_rerun()# =======================
+# REGISTRAR FICHA TÉCNICA
+# =======================
     if menu == "Registrar Ficha Técnica" and st.session_state["rol"] == "Administrador":
         st.header("📄 Registrar Ficha Técnica")
         fichas_path = "datos/fichas_tecnicas.csv"
@@ -275,155 +269,195 @@ else:
         else:
             fichas = pd.DataFrame()
 
-        st.subheader("📋 Datos generales")
-        fecha = st.date_input("Fecha", value=date.today())
-        cliente = st.selectbox("Cliente", lista_clientes) if lista_clientes else st.text_input("Cliente")
-        referencia = st.text_input("Referencia")
-        formula = st.text_input("Fórmula")
-        color = st.text_input("Color")
-        laminado = st.number_input("Laminado (mm)", min_value=0.0)
-        imagen = st.file_uploader("Imagen del producto (JPG/PNG)", type=["jpg", "jpeg", "png"])
+        # Estado para reinicio
+        if "ficha_guardada" not in st.session_state:
+            st.session_state["ficha_guardada"] = False
 
-        st.subheader("⚙️ Especificaciones técnicas")
-        dureza = st.text_input("Dureza")
-        temperatura = st.text_input("Temperatura (°C)")
-        presion = st.text_input("Presión (LB)")
-        peso = st.number_input("Peso del producto (gr)", min_value=1.0)
-        cavidades = st.number_input("Cavidades", min_value=1)
+        if st.session_state["ficha_guardada"]:
+            st.success("✅ Ficha técnica guardada exitosamente.")
+            if st.button("➕ Crear otra ficha"):
+                for key in list(st.session_state.keys()):
+                    if key.startswith("f_"):
+                        del st.session_state[key]
+                st.session_state["ficha_guardada"] = False
+                st.rerun()
+        else:
+            st.subheader("📋 Datos generales")
+            fecha = st.date_input("Fecha", value=date.today(), key="f_fecha")
+            cliente = st.selectbox("Cliente", lista_clientes, key="f_cliente")
+            referencia = st.text_input("Referencia", key="f_referencia")
+            formula = st.text_input("Fórmula", key="f_formula")
+            color = st.text_input("Color", key="f_color")
+            laminado = st.number_input("Laminado (mm)", min_value=0.01, key="f_laminado")
+            imagen = st.file_uploader("Imagen del producto (JPG/PNG)", type=["jpg", "jpeg", "png"], key="f_imagen")
 
-        st.subheader("⏱️ Tiempos de proceso")
-        tiempo_tacado = st.number_input("Tiempo de tacado (min)", step=0.1)
-        tiempo_vulcanizado = st.number_input("Tiempo de vulcanizado (min)", step=0.1)
-        tiempo_total = tiempo_tacado + tiempo_vulcanizado
-        promedio_hora = (60 / tiempo_total) * cavidades if tiempo_total > 0 else 0
+            st.subheader("⚙️ Especificaciones técnicas")
+            dureza = st.text_input("Dureza", key="f_dureza")
+            temperatura = st.text_input("Temperatura (°C)", key="f_temp")
+            presion = st.text_input("Presión (LB)", key="f_presion")
+            peso = st.number_input("Peso del producto (gr)", min_value=0.5, key="f_peso")
+            cavidades = st.number_input("Cavidades", min_value=1, key="f_cavidades")
 
-        st.subheader("✂️ Corte")
-        tiempo_corte = st.number_input("Tiempo de corte por unidad (min)", step=0.1)
-        cortadas_hora = 60 / tiempo_corte if tiempo_corte > 0 else 0
-        jornada = st.number_input("Horas jornada", value=8, min_value=1, max_value=24)
-        corte_dia = cortadas_hora * jornada
+            st.subheader("⏱️ Tiempos de proceso")
+            tiempo_tacado = st.number_input("Tiempo de tacado (min)", min_value=1.00, step=0.1, key="f_tacado")
+            tiempo_vulcanizado = st.number_input("Tiempo de vulcanizado (min)", min_value=0.50, step=0.1, key="f_vulcanizado")
+            tiempo_total = tiempo_tacado + tiempo_vulcanizado
+            promedio_hora = (60 / tiempo_total) * cavidades if tiempo_total > 0 else 0
 
-        st.subheader("📝 Observaciones")
-        observaciones = st.text_area("Observaciones")
+            st.subheader("✂️ Corte")
+            tiempo_corte = st.number_input("Tiempo de corte por unidad (min)", min_value=0.5, step=0.1, key="f_corte")
+            cortadas_hora = 60 / tiempo_corte if tiempo_corte > 0 else 0
+            jornada = st.number_input("Horas jornada", value=8, min_value=1, max_value=24, key="f_jornada")
+            corte_dia = cortadas_hora * jornada
 
-        if st.button("Guardar Ficha Técnica"):
-            # Validar referencia y versión
-            if "Versión" not in fichas.columns:
-                fichas["Versión"] = None
-            versiones = fichas[fichas["Referencia"] == referencia]["Versión"].tolist()
-            nueva_version = f"V{len(versiones)+1}"
+            st.subheader("📝 Observaciones")
+            observaciones = st.text_area("Observaciones", key="f_obs")
 
-            # Guardar imagen
-            img_name = f"imagen_{referencia}_{nueva_version}.png"
-            if imagen:
-                with open(f"datos/{img_name}", "wb") as f:
-                    f.write(imagen.read())
+            if st.button("💾 Guardar Ficha Técnica"):
+                campos_texto = [referencia, formula, color, dureza, temperatura, presion]
+                campos_numericos = [laminado, peso, cavidades, tiempo_tacado, tiempo_vulcanizado, tiempo_corte]
 
-            nueva_ficha = pd.DataFrame([{
-                "Referencia": referencia,
-                "Versión": nueva_version,
-                "Fecha": fecha,
-                "Cliente": cliente,
-                "Fórmula": formula,
-                "Color": color,
-                "Laminado": laminado,
-                "Imagen": img_name if imagen else "",
-                "Dureza": dureza,
-                "Temperatura": temperatura,
-                "Presión": presion,
-                "Peso": peso,
-                "Cavidades": cavidades,
-                "Tacado": tiempo_tacado,
-                "Vulcanizado": tiempo_vulcanizado,
-                "TiempoTotal": tiempo_total,
-                "PromedioHora": promedio_hora,
-                "TiempoCorteUnidad": tiempo_corte,
-                "CorteHora": cortadas_hora,
-                "CorteDiario": corte_dia,
-                "Jornada": jornada,
-                "Observaciones": observaciones
-            }])
+                if any(not c.strip() for c in campos_texto):
+                    st.error("❌ Todos los campos de texto son obligatorios.")
+                elif any(valor <= 0 for valor in campos_numericos):
+                    st.error("❌ Todos los valores numéricos deben ser mayores a cero.")
+                elif imagen is None:
+                    st.error("❌ Debe adjuntar una imagen del producto.")
+                else:
+                    if "Versión" not in fichas.columns:
+                        fichas["Versión"] = None
+                    versiones = fichas[fichas["Referencia"] == referencia]["Versión"].tolist()
+                    nueva_version = f"V{len(versiones)+1}"
 
-            fichas = pd.concat([fichas, nueva_ficha], ignore_index=True)
-            fichas.to_csv(fichas_path, index=False)
-            st.success(f"Ficha técnica {referencia} {nueva_version} guardada correctamente.")
+                    # Guardar imagen
+                    img_name = f"imagen_{referencia}_{nueva_version}.png"
+                    with open(f"datos/{img_name}", "wb") as f:
+                        f.write(imagen.read())
+
+                    nueva_ficha = pd.DataFrame([{
+                        "Referencia": referencia,
+                        "Versión": nueva_version,
+                        "Fecha": fecha,
+                        "Cliente": cliente,
+                        "Fórmula": formula,
+                        "Color": color,
+                        "Laminado": laminado,
+                        "Imagen": img_name,
+                        "Dureza": dureza,
+                        "Temperatura": temperatura,
+                        "Presión": presion,
+                        "Peso": peso,
+                        "Cavidades": cavidades,
+                        "Tacado": tiempo_tacado,
+                        "Vulcanizado": tiempo_vulcanizado,
+                        "TiempoTotal": tiempo_total,
+                        "PromedioHora": promedio_hora,
+                        "TiempoCorteUnidad": tiempo_corte,
+                        "CorteHora": cortadas_hora,
+                        "CorteDiario": corte_dia,
+                        "Jornada": jornada,
+                        "Observaciones": observaciones
+                    }])
+
+                    fichas = pd.concat([fichas, nueva_ficha], ignore_index=True)
+                    fichas.to_csv(fichas_path, index=False)
+
+                    st.session_state["ficha_guardada"] = True
+                    st.rerun()
             
-    # ==== Visualizar Ficha Técnica ====
+        # ==== Visualizar Ficha Técnica ====
     elif menu == "Visualizar Ficha Técnica":
         st.header("📁 Visualización de Fichas Técnicas")
+
         fichas_path = "datos/fichas_tecnicas.csv"
         if not os.path.exists(fichas_path):
             st.warning("No hay fichas técnicas registradas.")
-        else:
-            fichas = pd.read_csv(fichas_path)
+            st.stop()
 
-            if fichas.empty:
-                st.warning("No hay fichas registradas.")
-            else:
-                clientes = fichas["Cliente"].unique().tolist()
-                cliente_sel = st.selectbox("Selecciona un cliente", clientes)
+        fichas = pd.read_csv(fichas_path)
 
-                fichas_cliente = fichas[fichas["Cliente"] == cliente_sel]
-                referencias = fichas_cliente["Referencia"].unique().tolist()
-                referencia_sel = st.selectbox("Selecciona una referencia", referencias)
+        # 🔒 Filtrar filas inválidas que tengan NaN en campos críticos
+        campos_obligatorios = ["Cliente", "Referencia", "Versión"]
+        fichas = fichas.dropna(subset=campos_obligatorios)
 
-                # Filtrar por referencia y mostrar última versión
-                ficha = fichas_cliente[fichas_cliente["Referencia"] == referencia_sel]
-                ficha = ficha.sort_values("Versión", ascending=False).iloc[0]
+        if fichas.empty:
+            st.warning("No hay fichas válidas registradas.")
+            st.stop()
 
-                # ENCABEZADO
-                st.markdown("---")
-                col1, col2 = st.columns([1, 5])
-                with col1:
-                    st.image("https://i.imgur.com/9GU0T8B.png", width=100)  # Reemplaza con tu logo si es local
-                with col2:
-                    st.markdown("## FICHA TÉCNICA DE PRODUCTO")
-                    st.markdown(f"**Versión:** {ficha['Versión']} | **Código ficha:** FTP-{ficha.name:03d}")
+        clientes = fichas["Cliente"].dropna().unique().tolist()
+        cliente_sel = st.selectbox("Selecciona un cliente", clientes)
 
-                st.markdown("---")
-                col1, col2, col3 = st.columns(3)
-                col1.markdown(f"**📅 Fecha:** {ficha['Fecha']}")
-                col2.markdown(f"**🏢 Cliente:** {ficha['Cliente']}")
-                col3.markdown(f"**🧪 Fórmula:** {ficha['Fórmula']}")
+        fichas_cliente = fichas[fichas["Cliente"] == cliente_sel]
+        referencias = fichas_cliente["Referencia"].dropna().unique().tolist()
 
-                st.markdown("---")
-                st.markdown("### 📦 Especificaciones del Producto")
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    if ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
-                        st.image(f"datos/{ficha['Imagen']}", caption="Imagen del producto", width=200)
-                with col2:
-                    st.markdown(f"**Referencia:** {ficha['Referencia']}")
-                    st.markdown(f"**Color:** {ficha['Color']}")
-                    st.markdown(f"**Laminado:** {ficha['Laminado']} mm")
-                    st.markdown(f"**Peso:** {ficha['Peso']} gr")
-                    st.markdown(f"**Dureza:** {ficha['Dureza']}")
-                    st.markdown(f"**Cavidades:** {ficha['Cavidades']}")
+        if not referencias:
+            st.warning("Este cliente no tiene fichas técnicas registradas.")
+            st.stop()
 
-                st.markdown("---")
-                st.markdown("### ⚙️ Especificaciones del Proceso")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**Temperatura:** {ficha['Temperatura']}")
-                    st.markdown(f"**Presión:** {ficha['Presión']}")
-                    st.markdown(f"**Vulcanizado:** {ficha['Vulcanizado']} min")
-                with col2:
-                    st.markdown(f"**Tacado:** {ficha['Tacado']} min")
-                    st.markdown(f"**Tiempo Total:** {ficha['TiempoTotal']} min")
-                    st.markdown(f"**Promedio por Hora:** {ficha['PromedioHora']:.2f} uds")
+        referencia_sel = st.selectbox("Selecciona una referencia", referencias)
 
-                st.markdown("---")
-                st.markdown("### ✂️ Datos de Corte")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**Tiempo por unidad:** {ficha['TiempoCorteUnidad']} min")
-                with col2:
-                    st.markdown(f"**Corte por Hora:** {ficha['CorteHora']:.2f} uds")
-                    st.markdown(f"**Corte diario estimado:** {ficha['CorteDiario']:.2f} uds")
+        ficha = fichas_cliente[fichas_cliente["Referencia"] == referencia_sel]
 
-                st.markdown("---")
-                st.markdown("### 📝 Observaciones")
-                st.write(ficha["Observaciones"])
+        if ficha.empty:
+            st.warning("⚠️ No hay ficha técnica registrada para esta referencia.")
+            st.stop()
+
+        ficha = ficha.sort_values("Versión", ascending=False).iloc[0]
+
+
+                    # ENCABEZADO
+        st.markdown("---")
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            st.image("https://i.imgur.com/9GU0T8B.png", width=100)  # Reemplaza con tu logo si es local
+        with col2:
+            st.markdown("## FICHA TÉCNICA DE PRODUCTO")
+            st.markdown(f"**Versión:** {ficha['Versión']} | **Código ficha:** FTP-{ficha.name:03d}")
+
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        col1.markdown(f"**📅 Fecha:** {ficha['Fecha']}")
+        col2.markdown(f"**🏢 Cliente:** {ficha['Cliente']}")
+        col3.markdown(f"**🧪 Fórmula:** {ficha['Fórmula']}")
+
+        st.markdown("---")
+        st.markdown("### 📦 Especificaciones del Producto")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
+                st.image(f"datos/{ficha['Imagen']}", caption="Imagen del producto", width=200)
+        with col2:
+            st.markdown(f"**Referencia:** {ficha['Referencia']}")
+            st.markdown(f"**Color:** {ficha['Color']}")
+            st.markdown(f"**Laminado:** {ficha['Laminado']} mm")
+            st.markdown(f"**Peso:** {ficha['Peso']} gr")
+            st.markdown(f"**Dureza:** {ficha['Dureza']}")
+            st.markdown(f"**Cavidades:** {ficha['Cavidades']}")
+
+        st.markdown("---")
+        st.markdown("### ⚙️ Especificaciones del Proceso")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Temperatura:** {ficha['Temperatura']}")
+            st.markdown(f"**Presión:** {ficha['Presión']}")
+            st.markdown(f"**Vulcanizado:** {ficha['Vulcanizado']} min")
+        with col2:
+            st.markdown(f"**Tacado:** {ficha['Tacado']} min")
+            st.markdown(f"**Tiempo Total:** {ficha['TiempoTotal']} min")
+            st.markdown(f"**Promedio por Hora:** {ficha['PromedioHora']:.2f} uds")
+
+        st.markdown("---")
+        st.markdown("### ✂️ Datos de Corte")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Tiempo por unidad:** {ficha['TiempoCorteUnidad']} min")
+        with col2:
+            st.markdown(f"**Corte por Hora:** {ficha['CorteHora']:.2f} uds")
+            st.markdown(f"**Corte diario estimado:** {ficha['CorteDiario']:.2f} uds")
+
+        st.markdown("---")
+        st.markdown("### 📝 Observaciones")
+        st.write(ficha["Observaciones"])
 # =======================
 # VISUALIZAR ÓRDENES DE PRODUCCIÓN
 # =======================
@@ -591,8 +625,7 @@ else:
                 st.session_state["productos_temp"] = []
                 st.rerun()
 
-
-        # Registrar orden (solo si hay productos)
+# Registrar orden (solo si hay productos)
         if st.button("✅ Registrar Orden de Compra") and st.session_state["productos_temp"]:
             nueva_orden = pd.DataFrame([{
                 "ID_Orden": nuevo_id,
@@ -655,9 +688,6 @@ else:
 
             # Guardar cambios en archivo CSV
             ordenes_df.to_csv(ordenes_path, index=False)
-
-
-
             st.subheader("🔎 Filtro por estado")
             estados = ordenes_df["Estado"].unique().tolist()
             estado_filtro = st.selectbox("Selecciona un estado", ["Todos"] + estados)
@@ -799,4 +829,3 @@ else:
                 st.success(f"✅ Orden de Producción **{nuevo_id}** registrada exitosamente.")
             elif submit_op:
                 st.warning("⚠️ Debes seleccionar al menos una referencia para producir.")
-
