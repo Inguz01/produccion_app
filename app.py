@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import os
 import re
+import time
 import streamlit.components.v1 as components
 from datetime import date
+
 
 
 # Crear carpeta de datos si no existe
@@ -552,52 +554,76 @@ else:
         st.header("🏭 Órdenes de Producción")
         st.subheader("🧾 Órdenes Generales")
 
-        # Archivos
         op_path = "datos/ordenes_produccion.csv"
         detalle_op_path = "datos/detalle_ordenes_produccion.csv"
         produccion_real_path = "datos/produccion_real.csv"
+        oc_path = "datos/ordenes_compra.csv"  # para traer el número de OC del cliente
 
-        if not all([os.path.exists(op_path), os.path.exists(detalle_op_path), os.path.exists(produccion_real_path)]):
+        if not all(os.path.exists(p) for p in [op_path, detalle_op_path, produccion_real_path, oc_path]):
             st.warning("No hay datos suficientes para mostrar órdenes de producción.")
             st.stop()
 
         op_df = pd.read_csv(op_path)
         detalle_op_df = pd.read_csv(detalle_op_path)
         produccion_real_df = pd.read_csv(produccion_real_path)
+        ordenes_oc = pd.read_csv(oc_path)
+
+        # Agregar el número de OC del cliente al detalle de OP
+        detalle_op_df["OC_Origen"] = detalle_op_df["OC_Origen"].astype(str)
+        ordenes_oc["Numero_OC_Cliente"] = ordenes_oc["Numero_OC_Cliente"].astype(str)
+        
+        detalle_op_df = detalle_op_df.merge(
+            ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
+            left_on="OC_Origen",
+            right_on="Numero_OC_Cliente",
+            how="left"
+        )
 
         # Agrupar producción real
         produccion_agrupada = produccion_real_df.groupby(["ID_OP", "Referencia"])["Cantidad_Producida"].sum().reset_index()
 
-        # Unir con detalle
+        # Unir con detalle OP
         detalle_completo = detalle_op_df.merge(
             produccion_agrupada,
-            how="left",
-            on=["ID_OP", "Referencia"]
+            on=["ID_OP", "Referencia"],
+            how="left"
         ).fillna({"Cantidad_Producida": 0})
 
-        # Avance global por OP
+        # Calcular avance global por OP
         avance_por_op = detalle_completo.groupby("ID_OP").apply(
             lambda x: (x["Cantidad_Producida"].sum() / x["Cantidad_Producir"].sum()) * 100 if x["Cantidad_Producir"].sum() > 0 else 0
         ).reset_index(name="Avance (%)")
 
         resumen = op_df.merge(avance_por_op, on="ID_OP", how="left").fillna({"Avance (%)": 0})
 
-        # Mostrar resumen con expander
         for _, row in resumen.iterrows():
             with st.expander(f"🔹 {row['ID_OP']} | Cliente: {row['Cliente']} | Fecha: {row['Fecha_Creacion']}"):
                 st.markdown(f"**Avance general:** {row['Avance (%)']:.2f}%")
 
                 detalle_filtrado = detalle_completo[detalle_completo["ID_OP"] == row["ID_OP"]]
+
+                # Agrupar referencias duplicadas en una sola línea
+                detalle_filtrado = detalle_filtrado.groupby(
+                    ["Referencia", "OC_Origen", "Fecha_Entrega"]
+                ).agg({
+                    "Cantidad_Producir": "sum",
+                    "Cantidad_Producida": "sum"
+                }).reset_index()
+
+                # Eliminar duplicados por seguridad
+                detalle_filtrado = detalle_filtrado.drop_duplicates(subset=["Referencia", "OC_Origen", "Fecha_Entrega", "Cantidad_Producir"])
+
                 for _, det in detalle_filtrado.iterrows():
                     avance_ref = (det["Cantidad_Producida"] / det["Cantidad_Producir"]) * 100 if det["Cantidad_Producir"] > 0 else 0
                     st.markdown(
                         f"📦 Referencia: **{det['Referencia']}** | "
-                        f"De OC: {det['OC_Origen']} | "
+                        f"OC Cliente: {det['OC_Origen']} | "
                         f"Programado: {det['Cantidad_Producir']} uds | "
                         f"Producido: {int(det['Cantidad_Producida'])} uds | "
                         f"Avance: **{avance_ref:.2f}%** | "
                         f"Fecha Entrega: {det['Fecha_Entrega']}"
                     )
+
 # =======================
 # REGISTRAR ORDEN DE COMPRA
 # =======================
@@ -830,53 +856,108 @@ else:
         oc_path = "datos/ordenes_compra.csv"
         detalle_oc_path = "datos/detalle_ordenes_compra.csv"
 
-        # Cargar OCs y fichas
         if not os.path.exists(oc_path) or not os.path.exists(detalle_oc_path):
             st.warning("No hay órdenes de compra registradas.")
             st.stop()
 
         ordenes_oc = pd.read_csv(oc_path)
         detalle_oc = pd.read_csv(detalle_oc_path)
+
+        # Validación permanente de columna Producido
+        if "Producido" not in detalle_oc.columns:
+            detalle_oc["Producido"] = 0
+        else:
+            detalle_oc["Producido"] = detalle_oc["Producido"].fillna(0)
+
         fichas_df = pd.read_csv("datos/fichas_tecnicas.csv")
 
         clientes_disponibles = ordenes_oc["Cliente"].unique().tolist()
         cliente_sel = st.selectbox("Selecciona el cliente", clientes_disponibles)
 
-        # Filtrar OCs y fichas por cliente
         ocs_cliente = ordenes_oc[ordenes_oc["Cliente"] == cliente_sel]
         detalle_cliente = detalle_oc[detalle_oc["ID_Orden"].isin(ocs_cliente["ID_Orden"])]
-        referencias_cliente = fichas_df[fichas_df["Cliente"] == cliente_sel]["Referencia"].unique().tolist()
+        detalle_cliente = detalle_cliente.merge(
+            ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
+            on="ID_Orden", how="left"
+        )
+        detalle_cliente["Pendiente"] = detalle_cliente["Cantidad"] - detalle_cliente["Producido"]
 
-        # Mostrar referencias disponibles
-        st.subheader("📦 Referencias pendientes de las OC")
-        resumen = detalle_cliente.groupby(["Referencia", "ID_Orden", "Fecha_Entrega"]).agg({
-            "Cantidad": "sum"
+        # Excluir combinaciones ya incluidas en una OP
+        if os.path.exists(detalle_op_path):
+            detalle_op_df = pd.read_csv(detalle_op_path)
+            detalle_cliente["clave"] = (
+                detalle_cliente["Referencia"].astype(str) + "|" +
+                detalle_cliente["Numero_OC_Cliente"].astype(str) + "|" +
+                detalle_cliente["Fecha_Entrega"].astype(str)
+            )
+            detalle_op_df["clave"] = (
+                detalle_op_df["Referencia"].astype(str) + "|" +
+                detalle_op_df["OC_Origen"].astype(str) + "|" +
+                detalle_op_df["Fecha_Entrega"].astype(str)
+            )
+            detalle_cliente = detalle_cliente[~detalle_cliente["clave"].isin(detalle_op_df["clave"])]
+            detalle_cliente.drop(columns="clave", inplace=True)
+
+        detalle_cliente = detalle_cliente[detalle_cliente["Pendiente"] > 0]
+
+        resumen = detalle_cliente.groupby(["Referencia", "Numero_OC_Cliente", "Fecha_Entrega"]).agg({
+            "Pendiente": "sum"
         }).reset_index()
 
-        st.dataframe(resumen.rename(columns={
-            "ID_Orden": "OC",
-            "Cantidad": "Pendiente"
-        }))
+        if resumen.empty:
+            st.subheader("📦 Referencias pendientes por generar una OP")
+            st.success("✅ No hay referencias pendientes para generar OP.")
+            st.stop()
+        else:
+            st.subheader("📦 Referencias pendientes por generar una OP")
+            st.dataframe(resumen.rename(columns={"Numero_OC_Cliente": "OC"}))
 
         st.subheader("➕ Selección de referencias para producir")
-        st.markdown("Selecciona las referencias a producir, indicando cantidad total. Luego se distribuirá automáticamente entre las OC en orden de entrega.")
+        st.markdown("Selecciona las referencias que deseas producir. Por defecto se prellena el total pendiente.")
 
         with st.form("form_op"):
             seleccionadas = []
-            for ref in referencias_cliente:
-                cantidad_total = st.number_input(f"🔹 {ref} - Cantidad total a producir", min_value=0, key=f"ref_{ref}")
-                if cantidad_total > 0:
-                    seleccionadas.append((ref, cantidad_total))
+            for _, fila in resumen.iterrows():
+                ref = fila["Referencia"]
+                oc = fila["Numero_OC_Cliente"]
+                fecha = fila["Fecha_Entrega"]
+                pendiente = int(fila["Pendiente"])
 
-            submit_op = st.form_submit_button("Registrar Orden de Producción")
+                clave = f"{ref}_{oc}_{fecha}"
+                col1, col2 = st.columns([4, 2])
 
-            if submit_op and seleccionadas:
-                # Crear nueva OP
-                if os.path.exists(op_path):
-                    op_df = pd.read_csv(op_path)
-                else:
-                    op_df = pd.DataFrame(columns=["ID_OP", "Cliente", "Fecha_Creacion", "Estado"])
+                with col1:
+                    seleccionado = st.checkbox(
+                        f"🔹 {ref} (OC: {oc}, entrega: {fecha})",
+                        key=f"check_{clave}"
+                    )
+                with col2:
+                    cantidad = st.number_input(
+                        "Cantidad a producir",
+                        min_value=0,
+                        max_value=pendiente,
+                        value=pendiente if seleccionado else 0,
+                        step=1,
+                        key=f"input_{clave}",
+                        disabled=not seleccionado
+                    )
 
+                if seleccionado and cantidad > 0:
+                    seleccionadas.append({
+                        "Referencia": ref,
+                        "Cantidad_Seleccionada": cantidad,
+                        "OC": oc,
+                        "Fecha_Entrega": fecha
+                    })
+
+            submit_op = st.form_submit_button("✅ Registrar Orden de Producción")
+
+            if submit_op:
+                if not seleccionadas:
+                    st.warning("⚠️ Debes seleccionar al menos una referencia con cantidad mayor a cero.")
+                    st.stop()
+
+                op_df = pd.read_csv(op_path) if os.path.exists(op_path) else pd.DataFrame(columns=["ID_OP", "Cliente", "Fecha_Creacion", "Estado"])
                 nuevo_id = f"OP-{len(op_df)+1:04d}"
                 nueva_op = pd.DataFrame([{
                     "ID_OP": nuevo_id,
@@ -887,28 +968,35 @@ else:
                 op_df = pd.concat([op_df, nueva_op], ignore_index=True)
                 op_df.to_csv(op_path, index=False)
 
-                # Crear detalle OP
-                if os.path.exists(detalle_op_path):
-                    detalle_op_df = pd.read_csv(detalle_op_path)
-                else:
-                    detalle_op_df = pd.DataFrame(columns=["ID_OP", "Referencia", "Cantidad_Producir", "OC_Origen", "Cantidad_OC", "Fecha_Entrega"])
+                detalle_op_df = pd.read_csv(detalle_op_path) if os.path.exists(detalle_op_path) else pd.DataFrame(columns=[
+                    "ID_OP", "Referencia", "Cantidad_Producir", "OC_Origen", "Cantidad_OC", "Fecha_Entrega"
+                ])
 
                 nuevas_lineas = []
-                for ref, cantidad_total in seleccionadas:
-                    pendientes = resumen[resumen["Referencia"] == ref].sort_values("Fecha_Entrega")
-                    restante = cantidad_total
+                for item in seleccionadas:
+                    ref = item["Referencia"]
+                    cantidad_total = item["Cantidad_Seleccionada"]
+                    oc = item["OC"]
+                    fecha_entrega = item["Fecha_Entrega"]
 
-                    for _, fila in pendientes.iterrows():
+                    ref_detalle = detalle_cliente[
+                        (detalle_cliente["Referencia"] == ref) &
+                        (detalle_cliente["Numero_OC_Cliente"] == oc) &
+                        (detalle_cliente["Fecha_Entrega"] == fecha_entrega)
+                    ].sort_values("Fecha_Entrega")
+
+                    restante = cantidad_total
+                    for _, fila in ref_detalle.iterrows():
                         if restante <= 0:
                             break
-                        cantidad_oc = min(fila["Cantidad"], restante)
+                        cantidad_oc = min(fila["Pendiente"], restante)
                         nuevas_lineas.append({
                             "ID_OP": nuevo_id,
                             "Referencia": ref,
                             "Cantidad_Producir": cantidad_oc,
-                            "OC_Origen": fila["ID_Orden"],
+                            "OC_Origen": oc,
                             "Cantidad_OC": fila["Cantidad"],
-                            "Fecha_Entrega": fila["Fecha_Entrega"]
+                            "Fecha_Entrega": fecha_entrega
                         })
                         restante -= cantidad_oc
 
@@ -916,5 +1004,6 @@ else:
                 detalle_op_df.to_csv(detalle_op_path, index=False)
 
                 st.success(f"✅ Orden de Producción **{nuevo_id}** registrada exitosamente.")
-            elif submit_op:
-                st.warning("⚠️ Debes seleccionar al menos una referencia para producir.")
+                st.info("Redirigiendo en 3 segundos...")
+                time.sleep(3)
+                st.rerun()
