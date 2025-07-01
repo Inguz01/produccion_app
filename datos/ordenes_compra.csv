@@ -1,3 +1,5 @@
 ID_Orden,Cliente,Fecha_Recepcion,Estado,Numero_OC_Cliente
-1,Industria de Estufas Continental S.A,2025-06-22,Pendiente,23456
-2,Industria de Estufas Continental S.A,2025-06-22,Pendiente,23456
+27,Industria de Estufas Continental S.A,2025-06-30,Pendiente,12345
+30,Industria de Estufas Continental S.A,2025-06-30,Pendiente,23456
+31,Industria de Estufas Continental S.A,2025-06-30,Pendiente,34567
+32,Grupo North,2025-06-30,Pendiente,12345

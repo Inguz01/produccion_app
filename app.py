@@ -258,7 +258,9 @@ else:
                         clientes_df.to_csv(clientes_csv_path, index=False)
                         st.session_state["mostrar_form"] = False
                         st.session_state["editar_nit"] = None
-                        st.experimental_rerun()# =======================
+                        st.experimental_rerun()
+
+# =======================
 # REGISTRAR FICHA TÉCNICA
 # =======================
     if menu == "Registrar Ficha Técnica" and st.session_state["rol"] == "Administrador":
@@ -365,7 +367,16 @@ else:
                     st.session_state["ficha_guardada"] = True
                     st.rerun()
             
-        # ==== Visualizar Ficha Técnica ====
+# ==== Visualizar Ficha Técnica ====
+
+    if "modo_version" not in st.session_state:
+        st.session_state["modo_version"] = False
+    
+    if "ficha_guardada" not in st.session_state:
+        st.session_state["ficha_guardada"] = False
+
+
+
     elif menu == "Visualizar Ficha Técnica":
         st.header("📁 Visualización de Fichas Técnicas")
 
@@ -375,10 +386,7 @@ else:
             st.stop()
 
         fichas = pd.read_csv(fichas_path)
-
-        # 🔒 Filtrar filas inválidas que tengan NaN en campos críticos
-        campos_obligatorios = ["Cliente", "Referencia", "Versión"]
-        fichas = fichas.dropna(subset=campos_obligatorios)
+        fichas = fichas.dropna(subset=["Cliente", "Referencia", "Versión"])
 
         if fichas.empty:
             st.warning("No hay fichas válidas registradas.")
@@ -395,21 +403,18 @@ else:
             st.stop()
 
         referencia_sel = st.selectbox("Selecciona una referencia", referencias)
-
-        ficha = fichas_cliente[fichas_cliente["Referencia"] == referencia_sel]
-
+        ficha = fichas_cliente[fichas_cliente["Referencia"].str.lower() == referencia_sel.lower()]
         if ficha.empty:
             st.warning("⚠️ No hay ficha técnica registrada para esta referencia.")
             st.stop()
 
         ficha = ficha.sort_values("Versión", ascending=False).iloc[0]
 
-
-                    # ENCABEZADO
+# ENCABEZADO VISUAL
         st.markdown("---")
         col1, col2 = st.columns([1, 5])
         with col1:
-            st.image("https://i.imgur.com/9GU0T8B.png", width=100)  # Reemplaza con tu logo si es local
+            st.image("https://i.imgur.com/9GU0T8B.png", width=100)
         with col2:
             st.markdown("## FICHA TÉCNICA DE PRODUCTO")
             st.markdown(f"**Versión:** {ficha['Versión']} | **Código ficha:** FTP-{ficha.name:03d}")
@@ -458,6 +463,88 @@ else:
         st.markdown("---")
         st.markdown("### 📝 Observaciones")
         st.write(ficha["Observaciones"])
+
+        if st.session_state["ficha_guardada"]:
+            st.success("✅ Nueva versión registrada exitosamente.")
+            st.session_state["ficha_guardada"] = False
+
+ # ========= Generar Nueva Versión (solo administrador) =========
+        if "modo_version" not in st.session_state:
+            st.session_state["modo_version"] = False
+
+        if st.session_state["rol"] == "Administrador":
+            if not st.session_state["modo_version"]:
+                if st.button("🔁 Generar nueva versión"):
+                    st.session_state["modo_version"] = True
+                    st.rerun()
+
+        if st.session_state["modo_version"]:
+            with st.form("nueva_version"):
+                st.subheader("🆕 Crear nueva versión de ficha técnica")
+
+                campos_editables = {}
+                for campo in [
+                    "Fórmula", "Color", "Laminado", "Dureza", "Temperatura", "Presión",
+                    "Peso", "Cavidades", "Tacado", "Vulcanizado", "TiempoCorteUnidad",
+                    "Jornada", "Observaciones"
+                ]:
+                    tipo = float if campo in [
+                        "Laminado", "Peso", "TiempoCorteUnidad", "Tacado",
+                        "Vulcanizado", "Cavidades", "Jornada"
+                    ] else str
+                    valor = ficha[campo]
+                    nuevo = st.text_input(campo, str(valor)) if tipo == str else st.number_input(campo, value=float(valor), step=0.1)
+                    campos_editables[campo] = nuevo
+
+                nueva_imagen = st.file_uploader("📸 Nueva imagen (opcional)", type=["jpg", "jpeg", "png"])
+                confirmar = st.checkbox("☑️ Confirmo que deseo guardar esta nueva versión")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("💾 Guardar nueva versión")
+                with col2:
+                    cancelar = st.form_submit_button("❌ Cancelar")
+
+                if cancelar:
+                    st.session_state["modo_version"] = False
+                    st.rerun()
+
+                if submitted:
+                    cambios = any(str(ficha[c]) != str(campos_editables[c]) for c in campos_editables)
+                    if not confirmar:
+                        st.error("⚠️ Debes confirmar que deseas guardar la nueva versión.")
+                    elif not cambios and nueva_imagen is None:
+                        st.error("⚠️ Para crear una nueva versión debes modificar al menos un campo o cargar una nueva imagen.")
+                    else:
+                        nuevas_versiones = fichas[fichas["Referencia"].str.lower() == ficha["Referencia"].lower()]
+                        version_num = len(nuevas_versiones) + 1
+                        nueva_version = f"V{version_num}"
+
+                        imagen_nombre = ficha["Imagen"]
+                        if nueva_imagen:
+                            imagen_nombre = f"imagen_{ficha['Referencia']}_{nueva_version}.png"
+                            with open(f"datos/{imagen_nombre}", "wb") as f:
+                                f.write(nueva_imagen.read())
+
+                        nueva_ficha = ficha.copy()
+                        for campo, valor in campos_editables.items():
+                            nueva_ficha[campo] = valor
+
+                        nueva_ficha["TiempoTotal"] = float(nueva_ficha["Tacado"]) + float(nueva_ficha["Vulcanizado"])
+                        nueva_ficha["PromedioHora"] = (60 / nueva_ficha["TiempoTotal"]) * float(nueva_ficha["Cavidades"])
+                        nueva_ficha["CorteHora"] = 60 / float(nueva_ficha["TiempoCorteUnidad"])
+                        nueva_ficha["CorteDiario"] = nueva_ficha["CorteHora"] * float(nueva_ficha["Jornada"])
+                        nueva_ficha["Versión"] = nueva_version
+                        nueva_ficha["Fecha"] = date.today()
+                        nueva_ficha["Imagen"] = imagen_nombre
+
+                        fichas = pd.concat([fichas, pd.DataFrame([nueva_ficha])], ignore_index=True)
+                        fichas.to_csv(fichas_path, index=False)
+
+                        st.session_state["ficha_guardada"] = True
+                        st.session_state["modo_version"] = False
+                        st.rerun()
+
 # =======================
 # VISUALIZAR ÓRDENES DE PRODUCCIÓN
 # =======================
@@ -517,43 +604,42 @@ else:
     if menu == "Registrar Orden de Compra" and st.session_state["rol"] == "Administrador":
         st.header("📝 Registro de Orden de Compra")
 
-        # Archivos CSV
+        # Rutas de archivos
         ordenes_path = "datos/ordenes_compra.csv"
         detalles_path = "datos/detalle_ordenes_compra.csv"
         fichas_path = "datos/fichas_tecnicas.csv"
 
         # Cargar datos existentes
-        ordenes_df = pd.read_csv(ordenes_path) if os.path.exists(ordenes_path) else pd.DataFrame(columns=["ID_Orden", "Numero_OC_Cliente", "Cliente", "Fecha_Recepcion", "Estado"])
+        ordenes_df = pd.read_csv(ordenes_path, dtype={"Numero_OC_Cliente": str})if os.path.exists(ordenes_path) else pd.DataFrame(columns=["ID_Orden", "Cliente", "Numero_OC_Cliente", "Fecha_Recepcion", "Estado"])
         detalles_df = pd.read_csv(detalles_path) if os.path.exists(detalles_path) else pd.DataFrame(columns=["ID_Orden", "Referencia", "Cantidad", "Fecha_Entrega", "Precio_Unitario"])
         fichas_df = pd.read_csv(fichas_path) if os.path.exists(fichas_path) else pd.DataFrame()
 
-        # Generar nuevo ID de orden
-        nuevo_id = int(ordenes_df["ID_Orden"].max()) + 1 if not ordenes_df.empty else 1
+        # Generar nuevo ID incremental interno
+        nuevo_id = ordenes_df["ID_Orden"].max() + 1 if not ordenes_df.empty else 1
 
         st.subheader("📋 Información General")
         cliente = st.selectbox("Cliente", lista_clientes)
-        numero_oc_cliente = st.text_input("Número de Orden de Compra (Cliente)")
-
-
-        # Mantener cliente fijo una vez agregue productos
-        if "cliente_orden" not in st.session_state:
-            st.session_state["cliente_orden"] = cliente
-
-        if st.session_state.get("productos_temp") and cliente != st.session_state["cliente_orden"]:
-            st.warning("⚠️ No puedes cambiar el cliente una vez agregaste productos.")
-            cliente = st.session_state["cliente_orden"]
-
+        numero_oc_cliente = st.text_input("Número de Orden de Compra (cliente)")
         fecha_recepcion = st.date_input("Fecha de recepción", value=date.today())
 
-        # Inicializar almacenamiento temporal
+        # Validar número de orden repetido para el mismo cliente
+        if numero_oc_cliente and not st.session_state.get("productos_temp"):
+            duplicada = (
+                (ordenes_df["Cliente"] == cliente) &
+                (ordenes_df["Numero_OC_Cliente"] == numero_oc_cliente)
+            ).any()
+            if duplicada:
+                st.error(f"⚠️ Ya existe una orden de compra del cliente **{cliente}** con el número **{numero_oc_cliente}**.")
+                st.stop()
+
+        # Inicializar productos temporales
         if "productos_temp" not in st.session_state:
             st.session_state["productos_temp"] = []
 
-        # Filtrar productos disponibles para ese cliente
+        # Filtrar referencias del cliente
         referencias_disponibles = fichas_df[fichas_df["Cliente"] == cliente]["Referencia"].unique().tolist()
-
         if not referencias_disponibles:
-            st.warning(f"⚠️ No hay productos registrados para el cliente **{cliente}**. Crea primero una ficha técnica.")
+            st.warning(f"⚠️ No hay productos registrados para el cliente **{cliente}**.")
             st.stop()
 
         with st.form("form_producto"):
@@ -565,89 +651,92 @@ else:
             with col3:
                 fecha_entrega = st.date_input("Fecha de entrega", key="fecha_entrega")
             with col4:
-                precio_unitario = st.number_input("Precio unitario", min_value=0.0, step=0.01, key="precio")
+                precio_unitario = st.number_input("Precio unitario", min_value=0.01, step=0.01, key="precio")
 
             agregar = st.form_submit_button("➕ Agregar producto")
-            if agregar:
-                st.session_state["productos_temp"].append({
-                    "ID_Orden": nuevo_id,
-                    "Referencia": referencia,
-                    "Cantidad": cantidad,
-                    "Fecha_Entrega": fecha_entrega,
-                    "Precio_Unitario": precio_unitario
-                })
-                st.success(f"✅ Producto {referencia} agregado")
-                st.session_state["cliente_orden"] = cliente
-                st.rerun()
 
-# Mostrar productos agregados
+            if agregar:
+                if not numero_oc_cliente:
+                    st.error("⚠️ Debes ingresar el número de orden de compra del cliente antes de agregar productos.")
+                else:
+                    duplicada = (
+                        (ordenes_df["Cliente"] == cliente) &
+                        (ordenes_df["Numero_OC_Cliente"] == numero_oc_cliente)
+                    ).any()
+                    if duplicada:
+                        st.error(f"⚠️ Ya existe una orden de compra del cliente **{cliente}** con el número **{numero_oc_cliente}**.")
+                    else:
+                        st.session_state["productos_temp"].append({
+                            "ID_Orden": nuevo_id,
+                            "Referencia": referencia,
+                            "Cantidad": cantidad,
+                            "Fecha_Entrega": fecha_entrega,
+                            "Precio_Unitario": precio_unitario
+                        })
+                        st.success(f"✅ Producto {referencia} agregado")
+                        st.rerun()
+
+
+        # Mostrar productos agregados
         if st.session_state["productos_temp"]:
             st.markdown("### 📦 Productos en esta orden")
-
-            # Estilo CSS para tabla y botón
-            st.markdown("""
-                <style>
-                .btn-small {
-                    padding: 6px 10px;
-                    font-size: 14px;
-                    background-color: #3b82f6;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                }
-                .btn-small:hover {
-                    background-color: #2563eb;
-                }
-                </style>
-            """, unsafe_allow_html=True)
-
-            # Mostrar encabezado con columnas
             cols = st.columns([3, 1, 2, 2, 1])
             cols[0].markdown("**Referencia**")
             cols[1].markdown("**Cantidad**")
-            cols[2].markdown("**Fecha de Entrega**")
+            cols[2].markdown("**Fecha Entrega**")
             cols[3].markdown("**Precio Unitario**")
             cols[4].markdown("**Eliminar**")
 
-            for i, producto in enumerate(st.session_state["productos_temp"]):
+            for i, prod in enumerate(st.session_state["productos_temp"]):
                 cols = st.columns([3, 1, 2, 2, 1])
-                cols[0].markdown(producto["Referencia"])
-                cols[1].markdown(str(producto["Cantidad"]))
-                cols[2].markdown(str(producto["Fecha_Entrega"]))
-                cols[3].markdown(f"${producto['Precio_Unitario']:.2f}")
-                if cols[4].button("🗑️", key=f"eliminar_{i}"):
+                cols[0].markdown(prod["Referencia"])
+                cols[1].markdown(str(prod["Cantidad"]))
+                cols[2].markdown(str(prod["Fecha_Entrega"]))
+                cols[3].markdown(f"${prod['Precio_Unitario']:.2f}")
+                if cols[4].button("🗑️", key=f"del_{i}"):
                     st.session_state["productos_temp"].pop(i)
                     st.rerun()
 
-            # Botón para limpiar toda la lista
             if st.button("🧹 Limpiar productos"):
                 st.session_state["productos_temp"] = []
                 st.rerun()
 
-# Registrar orden (solo si hay productos)
-        if st.button("✅ Registrar Orden de Compra") and st.session_state["productos_temp"]:
-            nueva_orden = pd.DataFrame([{
-                "ID_Orden": nuevo_id,
-                "Numero_OC_Cliente": numero_oc_cliente,
-                "Cliente": cliente,
-                "Fecha_Recepcion": fecha_recepcion,
-                "Estado": "Recibida"
-            }])
-            nuevos_detalles = pd.DataFrame(st.session_state["productos_temp"])
+        # Registrar orden
+            if st.button("✅ Registrar Orden de Compra") and st.session_state["productos_temp"]:
+                if not numero_oc_cliente:
+                    st.error("⚠️ Debes ingresar el número de orden de compra del cliente.")
+                    st.stop()
 
-            # Guardar
-            ordenes_df = pd.concat([ordenes_df, nueva_orden], ignore_index=True)
-            detalles_df = pd.concat([detalles_df, nuevos_detalles], ignore_index=True)
+                # Validar duplicado justo antes de registrar
+                duplicada = (
+                    (ordenes_df["Cliente"] == cliente) &
+                    (ordenes_df["Numero_OC_Cliente"] == numero_oc_cliente)
+                ).any()
+                if duplicada:
+                    st.error(f"⚠️ Ya existe una orden de compra del cliente **{cliente}** con el número **{numero_oc_cliente}**.")
+                    st.stop()
 
-            ordenes_df.to_csv(ordenes_path, index=False)
-            detalles_df.to_csv(detalles_path, index=False)
 
-            st.success(f"Orden de compra **{nuevo_id}** registrada exitosamente.")
-            st.session_state["productos_temp"] = []
-            st.session_state["cliente_orden"] = ""
-        elif not st.session_state["productos_temp"]:
-            st.info("Agrega al menos un producto para registrar la orden.")
+                nueva_orden = pd.DataFrame([{
+                    "ID_Orden": nuevo_id,
+                    "Cliente": cliente,
+                    "Numero_OC_Cliente": numero_oc_cliente,
+                    "Fecha_Recepcion": fecha_recepcion,
+                    "Estado": "Recibida"
+                }])
+                nuevos_detalles = pd.DataFrame(st.session_state["productos_temp"])
+
+                ordenes_df = pd.concat([ordenes_df, nueva_orden], ignore_index=True)
+                detalles_df = pd.concat([detalles_df, nuevos_detalles], ignore_index=True)
+
+                ordenes_df.to_csv(ordenes_path, index=False)
+                detalles_df.to_csv(detalles_path, index=False)
+
+                st.success(f"✅ Orden de compra **{numero_oc_cliente}** registrada exitosamente.")
+                st.session_state["productos_temp"] = []
+
+            elif not st.session_state["productos_temp"]:
+                st.info("Agrega al menos un producto para registrar la orden.")
 
 # =======================
 # SEGUIMIENTO DE ORDEN DE COMPRA
@@ -662,7 +751,7 @@ else:
         if not os.path.exists(ordenes_path) or not os.path.exists(detalles_path):
             st.warning("No hay órdenes registradas.")
         else:
-            ordenes_df = pd.read_csv(ordenes_path)
+            ordenes_df = pd.read_csv(ordenes_path, dtype={"Numero_OC_Cliente": str})
             detalles_df = pd.read_csv(detalles_path)
 
             # Inicializar columna Producido si no existe
@@ -706,7 +795,7 @@ else:
                     total_producido = productos["Producido"].sum()
                     avance = total_producido / total_cantidad if total_cantidad > 0 else 0
 
-                    with st.expander(f"🧾 {orden['ID_Orden']} - {orden['Cliente']} ({avance*100:.1f}%)"):
+                    with st.expander(f"🧾 {orden['Numero_OC_Cliente']} - {orden['Cliente']} ({avance*100:.1f}%)"):
                         col1, col2, col3, col4 = st.columns(4)
                         col1.markdown(f"**📅 Fecha recepción:** {orden['Fecha_Recepcion']}")
                         col2.markdown(f"**📌 Estado:** {orden['Estado']}")
