@@ -3,10 +3,9 @@ import pandas as pd
 import os
 import re
 import time
+from datetime import datetime
 import streamlit.components.v1 as components
 from datetime import date
-
-
 
 # Crear carpeta de datos si no existe
 if not os.path.exists("datos"):
@@ -17,12 +16,10 @@ produccion_path = "datos/produccion_real.csv"
 if not os.path.exists(produccion_path):
     pd.DataFrame(columns=["ID_OP", "Referencia", "Cantidad_Producida", "Fecha_Registro", "OC_Origen"]).to_csv(produccion_path, index=False)
 
-
 # Cargar siempre tema oscuro
 if os.path.exists("datos/style_oscuro.css"):
     with open("datos/style_oscuro.css") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
 
 # Cargar estilos visuales corporativos
 if os.path.exists("datos/style.css"):
@@ -91,7 +88,8 @@ else:
         "Registrar Orden de Compra",
         "Seguimiento de Órdenes",
         "Registrar Orden de Producción",
-        "Órdenes de Producción"
+        "Órdenes de Producción",
+        "Programar Producción"
         ])
     else:
         menu = st.sidebar.selectbox("Menú", ["Visualizar Ficha Técnica"])
@@ -376,8 +374,6 @@ else:
     
     if "ficha_guardada" not in st.session_state:
         st.session_state["ficha_guardada"] = False
-
-
 
     elif menu == "Visualizar Ficha Técnica":
         st.header("📁 Visualización de Fichas Técnicas")
@@ -702,7 +698,6 @@ else:
                         st.success(f"✅ Producto {referencia} agregado")
                         st.rerun()
 
-
         # Mostrar productos agregados
         if st.session_state["productos_temp"]:
             st.markdown("### 📦 Productos en esta orden")
@@ -843,7 +838,6 @@ else:
                             colr1.markdown(f"🔹 **{referencia}**")
                             colr2.markdown(f"{int(producido)}/{int(cantidad)} unidades")
                             colr3.progress(progreso_valido, text=f"{progreso:.1f}% completado")
-
                             
 # ========================
 # REGISTRAR ORDEN DE PRODUCCIÓN
@@ -1006,4 +1000,109 @@ else:
                 st.success(f"✅ Orden de Producción **{nuevo_id}** registrada exitosamente.")
                 st.info("Redirigiendo en 3 segundos...")
                 time.sleep(3)
+                st.rerun()
+
+#---------------------
+# Programar Produccion
+# ---------------------
+            
+    elif menu == "Programar Producción":
+        st.header("📅 Programación de Producción")
+
+        # Archivos
+        op_path = "datos/ordenes_produccion.csv"
+        detalle_op_path = "datos/detalle_ordenes_produccion.csv"
+        maquinas_path = "datos/maquinas.csv"
+        usuarios_path = "datos/usuarios.csv"
+        programacion_path = "datos/programacion_produccion.csv"
+
+        # Verificar archivos requeridos
+        for path in [op_path, detalle_op_path, maquinas_path, usuarios_path]:
+            if not os.path.exists(path):
+                st.error(f"❌ Falta el archivo: {path}")
+                st.stop()
+
+        # Cargar datos
+        op_df = pd.read_csv(op_path)
+        detalle_op_df = pd.read_csv(detalle_op_path)
+        maquinas_df = pd.read_csv(maquinas_path)
+        usuarios_df = pd.read_csv(usuarios_path)
+        operarios_df = usuarios_df[usuarios_df["rol"] == "Operario"]
+
+        # Selección de fechas
+        fecha_inicio, fecha_fin = st.date_input("Selecciona el rango de fechas", value=(date.today(), date.today()))
+        if fecha_inicio > fecha_fin:
+            st.warning("⚠️ La fecha de inicio no puede ser posterior a la fecha final.")
+            st.stop()
+
+        fechas = pd.date_range(fecha_inicio, fecha_fin).to_pydatetime().tolist()
+
+        # Agrupar referencias por OP + Cliente + Referencia + OC + Fecha entrega (para evitar duplicados visuales)
+        referencias = (
+            detalle_op_df
+            .merge(op_df, on="ID_OP", how="left")
+            .groupby(["ID_OP", "Cliente", "Referencia", "OC_Origen", "Fecha_Entrega"], as_index=False)
+            .agg({"Cantidad_Producir": "sum"})
+        )
+
+        programaciones = []
+
+        with st.form("form_programacion"):
+            st.markdown("### 🧩 Asignación de Referencias por Día")
+
+            for dia in fechas:
+                st.markdown(f"---\n#### 📆 Fecha: {dia.date()}")
+
+                for idx, ref in referencias.iterrows():
+                    cliente = ref["Cliente"]
+                    referencia = ref["Referencia"]
+                    id_op = ref["ID_OP"]
+                    num_oc = ref["OC_Origen"]
+                    key_suffix = f"{referencia}_{id_op}_{num_oc}_{dia.date()}_{idx}"
+
+                    with st.expander(f"🔹 {referencia} | Cliente: {cliente} | OP: {id_op} | OC: {num_oc}"):
+                        col1, col2, col3 = st.columns(3)
+                        maquina = col1.selectbox("Máquina", maquinas_df["Nombre"].tolist(), key=f"maq_{key_suffix}")
+
+                        nombre_mostrado = col2.selectbox(
+                            "Operario",
+                            options=operarios_df["nombre"].tolist(),
+                            key=f"op_{key_suffix}"
+                        )
+
+                        # Obtener usuario del operario
+                        usuario_operario = operarios_df.loc[operarios_df["nombre"] == nombre_mostrado, "usuario"].values[0]
+
+                        hora_inicio = col3.time_input("Hora inicio", value=datetime.strptime("08:00", "%H:%M").time(), key=f"ini_{key_suffix}")
+                        hora_fin = st.time_input("Hora fin", value=datetime.strptime("17:00", "%H:%M").time(), key=f"fin_{key_suffix}")
+
+                        colf1, colf2 = st.columns(2)
+                        falla_inicio = colf1.time_input("🛠️ Inicio de falla (opcional)", key=f"fini_{key_suffix}")
+                        falla_fin = colf2.time_input("🛠️ Fin de falla (opcional)", key=f"ffin_{key_suffix}")
+
+                        programaciones.append({
+                            "Fecha": dia.date(),
+                            "ID_OP": id_op,
+                            "Cliente": cliente,
+                            "Referencia": referencia,
+                            "OC_Origen": num_oc,
+                            "Máquina": maquina,
+                            "Operario": usuario_operario,
+                            "Hora_Inicio": hora_inicio.strftime("%H:%M"),
+                            "Hora_Fin": hora_fin.strftime("%H:%M"),
+                            "Falla_Inicio": falla_inicio.strftime("%H:%M") if falla_inicio else "",
+                            "Falla_Fin": falla_fin.strftime("%H:%M") if falla_fin else ""
+                        })
+
+            submitted = st.form_submit_button("💾 Guardar programación")
+            if submitted:
+                prog_df = pd.DataFrame(programaciones)
+
+                if os.path.exists(programacion_path):
+                    existente = pd.read_csv(programacion_path)
+                    prog_df = pd.concat([existente, prog_df], ignore_index=True)
+
+                prog_df.to_csv(programacion_path, index=False)
+                st.success("✅ Programación guardada correctamente.")
+                time.sleep(2)
                 st.rerun()
