@@ -1,3 +1,6 @@
 usuario,clave,rol,nombre
 AG76885,12345,Administrador, Amaury Guzman
 HM12345,67890,Operario, Hector Mercado
+NB12345,12345,Operario,Nicolas Bonilla
+YA12345,12345,Operario,Yunior Alfonso
+RM12345,12345,Operario,Ronald Mercado

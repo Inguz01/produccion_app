@@ -1,3 +1,7 @@
 ID_Maquina,Nombre,Estado
 MO1,Prensa_1,Activa
 MO2,Prensa_2,Activa
+MO3,Prensa_3,Activa
+MO4,Prensa_4,Activa
+MO5,Prensa_5,Activa
+MO6,Inyectora,Activa

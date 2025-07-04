@@ -3,6 +3,8 @@ import pandas as pd
 import os
 import re
 import time
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from datetime import time as dtime
 from datetime import datetime
 import streamlit.components.v1 as components
 from datetime import date
@@ -1002,107 +1004,182 @@ else:
                 time.sleep(3)
                 st.rerun()
 
+#--------------------
+#PROGRAMAR PRODUCCION
 #---------------------
-# Programar Produccion
-# ---------------------
-            
-    elif menu == "Programar Producción":
-        st.header("📅 Programación de Producción")
 
-        # Archivos
-        op_path = "datos/ordenes_produccion.csv"
-        detalle_op_path = "datos/detalle_ordenes_produccion.csv"
+    elif menu == "Programar Producción":
+        st.header("📅 Programación de Producción (Asignación por Día)")
+
+        # === CARGA DE ARCHIVOS NECESARIOS ===
         maquinas_path = "datos/maquinas.csv"
         usuarios_path = "datos/usuarios.csv"
+        op_path = "datos/ordenes_produccion.csv"
+        detalle_op_path = "datos/detalle_ordenes_produccion.csv"
         programacion_path = "datos/programacion_produccion.csv"
 
-        # Verificar archivos requeridos
-        for path in [op_path, detalle_op_path, maquinas_path, usuarios_path]:
+        for path in [maquinas_path, usuarios_path, op_path, detalle_op_path]:
             if not os.path.exists(path):
                 st.error(f"❌ Falta el archivo: {path}")
                 st.stop()
 
-        # Cargar datos
-        op_df = pd.read_csv(op_path)
-        detalle_op_df = pd.read_csv(detalle_op_path)
         maquinas_df = pd.read_csv(maquinas_path)
         usuarios_df = pd.read_csv(usuarios_path)
         operarios_df = usuarios_df[usuarios_df["rol"] == "Operario"]
+        op_df = pd.read_csv(op_path)
+        detalle_op_df = pd.read_csv(detalle_op_path)
 
-        # Selección de fechas
-        fecha_inicio, fecha_fin = st.date_input("Selecciona el rango de fechas", value=(date.today(), date.today()))
-        if fecha_inicio > fecha_fin:
-            st.warning("⚠️ La fecha de inicio no puede ser posterior a la fecha final.")
+        referencias = detalle_op_df.merge(op_df, on="ID_OP", how="left")
+        referencias = referencias.groupby(["ID_OP", "Cliente", "Referencia", "OC_Origen", "Fecha_Entrega"], as_index=False).agg({"Cantidad_Producir": "sum"})
+        referencias_disponibles = referencias["Referencia"].dropna().unique().tolist()
+
+        if "planificacion_tmp" not in st.session_state:
+            st.session_state.planificacion_tmp = []
+        if "franjas_programadas" not in st.session_state:
+            st.session_state.franjas_programadas = []
+
+        # === SELECCION DE FECHA ===
+        fecha_dia = st.date_input("📅 Selecciona el día a programar", value=None)
+        if fecha_dia is None:
+            st.warning("⚠️ Debes seleccionar un día para poder programar.")
             st.stop()
 
-        fechas = pd.date_range(fecha_inicio, fecha_fin).to_pydatetime().tolist()
-
-        # Agrupar referencias por OP + Cliente + Referencia + OC + Fecha entrega (para evitar duplicados visuales)
-        referencias = (
-            detalle_op_df
-            .merge(op_df, on="ID_OP", how="left")
-            .groupby(["ID_OP", "Cliente", "Referencia", "OC_Origen", "Fecha_Entrega"], as_index=False)
-            .agg({"Cantidad_Producir": "sum"})
+        # === SELECCION DE MAQUINAS ===
+        maquinas_disponibles = st.multiselect(
+            "🛠️ Máquinas activas para este día",
+            maquinas_df["Nombre"].tolist(),
+            default=maquinas_df["Nombre"].tolist()
         )
+        if not maquinas_disponibles:
+            st.warning("⚠️ Debes seleccionar al menos una máquina.")
+            st.stop()
+        maquinas_df = maquinas_df[maquinas_df["Nombre"].isin(maquinas_disponibles)]
 
-        programaciones = []
+        # === GENERAR MATRIZ INICIAL ===
+        if not st.session_state.franjas_programadas:
+            for _, maq in maquinas_df.iterrows():
+                st.session_state.franjas_programadas.append({
+                    "Fecha": fecha_dia.strftime("%Y-%m-%d"),
+                    "Máquina": maq["Nombre"],
+                    "Referencia": "",
+                    "Operario": "",
+                    "Hora_Inicio": "08:00",
+                    "Hora_Fin": "17:00"
+                })
 
-        with st.form("form_programacion"):
-            st.markdown("### 🧩 Asignación de Referencias por Día")
+        if st.button("🛠️ Agregar franja"):
+            st.session_state.franjas_programadas.append({
+                "Fecha": fecha_dia.strftime("%Y-%m-%d"),
+                "Máquina": maquinas_disponibles[0],
+                "Referencia": "",
+                "Operario": "",
+                "Hora_Inicio": "08:00",
+                "Hora_Fin": "17:00"
+            })
 
-            for dia in fechas:
-                st.markdown(f"---\n#### 📆 Fecha: {dia.date()}")
+        df = pd.DataFrame(st.session_state.franjas_programadas)
+        horas_validas = [f"{h:02d}:00" for h in range(7, 19)]
 
-                for idx, ref in referencias.iterrows():
-                    cliente = ref["Cliente"]
-                    referencia = ref["Referencia"]
-                    id_op = ref["ID_OP"]
-                    num_oc = ref["OC_Origen"]
-                    key_suffix = f"{referencia}_{id_op}_{num_oc}_{dia.date()}_{idx}"
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_default_column(editable=True)
+        gb.configure_column("Fecha", type=["dateColumnFilter"], editable=False)
+        gb.configure_column("Máquina", cellEditor='agSelectCellEditor', cellEditorParams={'values': maquinas_disponibles})
+        gb.configure_column("Referencia", cellEditor='agSelectCellEditor', cellEditorParams={'values': referencias_disponibles})
+        gb.configure_column("Operario", cellEditor='agSelectCellEditor', cellEditorParams={'values': operarios_df["nombre"].tolist()})
+        gb.configure_column("Hora_Inicio", cellEditor='agRichSelectCellEditor', cellEditorParams={'values': horas_validas})
+        gb.configure_column("Hora_Fin", cellEditor='agRichSelectCellEditor', cellEditorParams={'values': horas_validas})
+        grid_options = gb.build()
 
-                    with st.expander(f"🔹 {referencia} | Cliente: {cliente} | OP: {id_op} | OC: {num_oc}"):
-                        col1, col2, col3 = st.columns(3)
-                        maquina = col1.selectbox("Máquina", maquinas_df["Nombre"].tolist(), key=f"maq_{key_suffix}")
+        st.subheader(f"🧩 Asignaciones para el día {fecha_dia.strftime('%Y-%m-%d')}")
+        grid_response = AgGrid(df, gridOptions=grid_options, height=400, update_mode=GridUpdateMode.VALUE_CHANGED, editable=True, theme="material")
+        df_editado = grid_response["data"]
 
-                        nombre_mostrado = col2.selectbox(
-                            "Operario",
-                            options=operarios_df["nombre"].tolist(),
-                            key=f"op_{key_suffix}"
-                        )
+        # === GUARDAR ASIGNACION DEL DÍa ===
+        if st.button("📌 Asignar este día"):
+            plan_dia = df_editado[(df_editado["Referencia"] != "") & (df_editado["Operario"] != "")].copy()
+            if plan_dia.empty:
+                st.warning("⚠️ No hay asignaciones válidas para guardar.")
+                st.stop()
 
-                        # Obtener usuario del operario
-                        usuario_operario = operarios_df.loc[operarios_df["nombre"] == nombre_mostrado, "usuario"].values[0]
+            plan_dia["Fecha"] = pd.to_datetime(plan_dia["Fecha"], format="mixed", errors="coerce").dt.strftime("%Y-%m-%d")
+            fecha_actual = plan_dia["Fecha"].iloc[0]
 
-                        hora_inicio = col3.time_input("Hora inicio", value=datetime.strptime("08:00", "%H:%M").time(), key=f"ini_{key_suffix}")
-                        hora_fin = st.time_input("Hora fin", value=datetime.strptime("17:00", "%H:%M").time(), key=f"fin_{key_suffix}")
+            st.session_state.planificacion_tmp = [
+                fila for fila in st.session_state.planificacion_tmp
+                if pd.to_datetime(fila["Fecha"], errors="coerce").strftime("%Y-%m-%d") != fecha_actual
+            ]
+            st.session_state.planificacion_tmp.extend(plan_dia.to_dict("records"))
+            st.session_state.franjas_programadas = []
 
-                        colf1, colf2 = st.columns(2)
-                        falla_inicio = colf1.time_input("🛠️ Inicio de falla (opcional)", key=f"fini_{key_suffix}")
-                        falla_fin = colf2.time_input("🛠️ Fin de falla (opcional)", key=f"ffin_{key_suffix}")
+            st.success(f"✅ Día {fecha_actual} asignado correctamente.")
+            time.sleep(1)
+            st.rerun()
 
-                        programaciones.append({
-                            "Fecha": dia.date(),
-                            "ID_OP": id_op,
-                            "Cliente": cliente,
-                            "Referencia": referencia,
-                            "OC_Origen": num_oc,
-                            "Máquina": maquina,
-                            "Operario": usuario_operario,
-                            "Hora_Inicio": hora_inicio.strftime("%H:%M"),
-                            "Hora_Fin": hora_fin.strftime("%H:%M"),
-                            "Falla_Inicio": falla_inicio.strftime("%H:%M") if falla_inicio else "",
-                            "Falla_Fin": falla_fin.strftime("%H:%M") if falla_fin else ""
-                        })
+        # === VISTA Y EDICION DE PLANIFICACION ACUMULADA ===
+        if st.session_state.planificacion_tmp:
+            st.subheader("📋 Planificación acumulada (no guardada aún)")
+            fechas_unicas = sorted(set(
+                pd.to_datetime(f["Fecha"]).strftime("%Y-%m-%d") for f in st.session_state.planificacion_tmp
+            ))
 
-            submitted = st.form_submit_button("💾 Guardar programación")
-            if submitted:
-                prog_df = pd.DataFrame(programaciones)
+            for fecha in fechas_unicas:
+                st.markdown(f"### 📆 Día: {fecha}")
+                df_dia = pd.DataFrame([
+                    f for f in st.session_state.planificacion_tmp
+                    if pd.to_datetime(f["Fecha"]).strftime("%Y-%m-%d") == fecha
+                ])
+                st.dataframe(df_dia)
+
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    if st.button(f"🗑️ Eliminar día {fecha}", key=f"del_{fecha}"):
+                        st.session_state.planificacion_tmp = [
+                            f for f in st.session_state.planificacion_tmp
+                            if pd.to_datetime(f["Fecha"]).strftime("%Y-%m-%d") != fecha
+                        ]
+                        st.success(f"✅ Día {fecha} eliminado.")
+                        time.sleep(1)
+                        st.rerun()
+
+                with col2:
+                    if st.button(f"✏️ Editar día {fecha}", key=f"edit_{fecha}"):
+                        st.session_state.franjas_programadas = df_dia.to_dict("records")
+                        st.info(f"ℹ️ Día {fecha} cargado para edición. Realiza los cambios y vuelve a asignarlo.")
+                        time.sleep(1)
+                        st.rerun()
+
+            if st.button("🟢 Programar producción (guardar todo)"):
+                df_final = pd.DataFrame(st.session_state.planificacion_tmp)
+
+                # Validar franjas horarias solapadas por operario
+                conflictos = []
+                for i, fila1 in df_final.iterrows():
+                    for j, fila2 in df_final.iterrows():
+                        if i >= j:
+                            continue
+                        if (
+                            fila1["Fecha"] == fila2["Fecha"]
+                            and fila1["Operario"] == fila2["Operario"]
+                            and not (fila1["Hora_Fin"] <= fila2["Hora_Inicio"] or fila2["Hora_Fin"] <= fila1["Hora_Inicio"])
+                        ):
+                            conflictos.append((i, j))
+
+                if conflictos:
+                    st.error("❌ Hay operarios asignados en franjas horarias solapadas.")
+                    st.stop()
+
+                df_final["Operario"] = df_final["Operario"].map(
+                    lambda nombre: operarios_df.loc[operarios_df["nombre"] == nombre, "usuario"].values[0]
+                    if nombre in operarios_df["nombre"].values else ""
+                )
 
                 if os.path.exists(programacion_path):
                     existente = pd.read_csv(programacion_path)
-                    prog_df = pd.concat([existente, prog_df], ignore_index=True)
+                    df_final = pd.concat([existente, df_final], ignore_index=True)
 
-                prog_df.to_csv(programacion_path, index=False)
-                st.success("✅ Programación guardada correctamente.")
+                df_final.to_csv(programacion_path, index=False)
+                st.success("✅ Programación de producción guardada exitosamente.")
+                st.session_state.planificacion_tmp = []
+                st.session_state.franjas_programadas = []
                 time.sleep(2)
                 st.rerun()
