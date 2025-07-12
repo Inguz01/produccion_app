@@ -1008,6 +1008,7 @@ else:
                 time.sleep(3)
                 st.rerun()
 
+
 # --------------------
 # PROGRAMAR PRODUCCIÓN
 # --------------------
@@ -1022,8 +1023,8 @@ else:
             }
             </style>
         """, unsafe_allow_html=True)
-
-        st.header("📅 Programación de Producción (Asignación por Día)")
+    
+        st.header("Programación de Producción (Asignación por Día)")
 
         maquinas_path = "datos/maquinas.csv"
         usuarios_path = "datos/usuarios.csv"
@@ -1051,24 +1052,26 @@ else:
         if "planificacion_definitiva" not in st.session_state:
             st.session_state.planificacion_definitiva = []
 
-        # === SELECCION DE FECHA ===
-        fecha_dia = st.date_input("📅 Selecciona el día a programar", value=st.session_state.get("fecha_dia"))
-        if fecha_dia is None:
-            st.info("👈 Selecciona un nuevo día para continuar programando.")
-        else:
-            st.session_state["fecha_dia"] = fecha_dia
+        fecha_dia = st.date_input("📅 Selecciona el día a programar")
+
+        if fecha_dia:
             fecha_str = fecha_dia.strftime("%Y-%m-%d")
-            st.subheader(f"🧾 Asignaciones para el día {fecha_str}")
+            st.subheader(f"🧾 Asignaciones para el {fecha_str}")
 
             if st.button("➕ Nueva asignación"):
-                st.session_state.planificacion_tmp.append({
+                nueva = {
                     "Fecha": fecha_str,
                     "Máquina": "",
                     "Referencia": "",
                     "Operario": "",
-                    "Hora_Inicio": None,
-                    "Hora_Fin": None
-                })
+                    "Hora_Inicio": dtime(8, 0),
+                    "Hora_Fin": dtime(17, 0)
+                }
+                # Buscar el último índice donde aparece la misma fecha
+                indices_fecha = [i for i, f in enumerate(st.session_state.planificacion_tmp) if f["Fecha"] == fecha_str]
+                idx = max(indices_fecha) + 1 if indices_fecha else len(st.session_state.planificacion_tmp)
+                st.session_state.planificacion_tmp.insert(idx, nueva)
+
 
             asignaciones_actuales = [fila for fila in st.session_state.planificacion_tmp if fila["Fecha"] == fecha_str]
             eliminar_indices = []
@@ -1077,133 +1080,87 @@ else:
                 col0, col1, col2, col3, col4, col5, col6 = st.columns([0.3, 2.5, 3, 2.5, 1.5, 1.5, 0.5], gap="small")
                 with col0:
                     st.markdown(f"**{i+1}**")
-
                 fila["Máquina"] = col1.selectbox("Máquina", maquinas_df["Nombre"].tolist(), index=maquinas_df["Nombre"].tolist().index(fila["Máquina"]) if fila["Máquina"] in maquinas_df["Nombre"].tolist() else 0, key=f"maq_{i}")
                 fila["Referencia"] = col2.selectbox("Referencia", referencias_disponibles, index=referencias_disponibles.index(fila["Referencia"]) if fila["Referencia"] in referencias_disponibles else 0, key=f"ref_{i}")
                 fila["Operario"] = col3.selectbox("Operario", operarios_df["nombre"].tolist(), index=operarios_df["nombre"].tolist().index(fila["Operario"]) if fila["Operario"] in operarios_df["nombre"].tolist() else 0, key=f"ope_{i}")
-                fila["Hora_Inicio"] = col4.time_input("Hora Inicio", value=fila["Hora_Inicio"] if fila["Hora_Inicio"] else dtime(8, 0), key=f"ini_{i}")
-                fila["Hora_Fin"] = col5.time_input("Hora Fin", value=fila["Hora_Fin"] if fila["Hora_Fin"] else dtime(17, 0), key=f"fin_{i}")
-
-                if col6.button("🗑️", key=f"del_{i}"):
+                fila["Hora_Inicio"] = col4.time_input("Inicio", value=fila["Hora_Inicio"], key=f"ini_{i}")
+                fila["Hora_Fin"] = col5.time_input("Fin", value=fila["Hora_Fin"], key=f"fin_{i}")
+                if col6.button("🗑️", key=f"del_tmp_{i}"):
                     eliminar_indices.append(i)
 
             for idx in sorted(eliminar_indices, reverse=True):
                 del st.session_state.planificacion_tmp[idx]
 
             if st.button("✅ Asignar este día"):
-                plan_dia = [fila for fila in st.session_state.planificacion_tmp if fila["Fecha"] == fecha_str]
-
+                plan_dia = [f for f in st.session_state.planificacion_tmp if f["Fecha"] == fecha_str]
                 errores = []
-                for i, fila_i in enumerate(plan_dia):
-                    for campo in ["Máquina", "Referencia", "Operario", "Hora_Inicio", "Hora_Fin"]:
-                        if not fila_i[campo]:
-                            errores.append(f"❌ La fila {i+1} tiene el campo '{campo}' vacío.")
+                for i, fila in enumerate(plan_dia):
+                    if not all([fila["Máquina"], fila["Referencia"], fila["Operario"], fila["Hora_Inicio"], fila["Hora_Fin"]]):
+                        errores.append(f"❌ Fila {i+1} incompleta.")
+                    if fila["Hora_Inicio"] >= fila["Hora_Fin"]:
+                        errores.append(f"🕒 Hora inválida en fila {i+1}.")
 
-                    if fila_i["Hora_Inicio"] and fila_i["Hora_Fin"] and fila_i["Hora_Inicio"] >= fila_i["Hora_Fin"]:
-                        errores.append(f"🕒 La hora de inicio debe ser menor que la hora de fin en la fila {i+1}.")
+                if errores:
+                    for e in errores:
+                        st.error(e)
+                else:
+                    st.session_state.planificacion_definitiva.extend(plan_dia)
+                    st.session_state.planificacion_tmp = [f for f in st.session_state.planificacion_tmp if f["Fecha"] != fecha_str]
+                    st.rerun()
 
-                    for j, fila_j in enumerate(plan_dia):
-                        if i >= j:
+        st.markdown("### 📋 Planificación acumulada (sin guardar)")
+
+        df_acum = pd.DataFrame(st.session_state.planificacion_definitiva)
+        if not df_acum.empty:
+            df_acum = df_acum.sort_values(by=["Fecha", "Máquina", "Hora_Inicio"]).reset_index(drop=True)
+            for i, fila in df_acum.iterrows():
+                fila_id = f"{fila['Fecha']}|{fila['Máquina']}|{fila['Referencia']}|{fila['Operario']}|{fila['Hora_Inicio']}|{fila['Hora_Fin']}"
+                col1, col2 = st.columns([0.92, 0.08])
+                col1.markdown(
+                    f"📅 {fila['Fecha']} | 🛠️ {fila['Máquina']} | 📦 {fila['Referencia']} | 👷‍♂️ {fila['Operario']} | ⏰ {fila['Hora_Inicio']} - {fila['Hora_Fin']}"
+                )
+                if col2.button("🗑️", key=f"elim_def_{i}"):
+                    st.session_state.planificacion_definitiva = [
+                        f for f in st.session_state.planificacion_definitiva
+                        if f"{f['Fecha']}|{f['Máquina']}|{f['Referencia']}|{f['Operario']}|{f['Hora_Inicio']}|{f['Hora_Fin']}" != fila_id
+                    ]
+                    st.rerun()
+
+
+            st.markdown("---")
+            st.subheader("📅 Guardar programación definitiva")
+            if st.button("📦 Guardar programación"):
+                errores = []
+                df_validado = pd.DataFrame(st.session_state.planificacion_definitiva)
+                for i, fila_i in df_validado.iterrows():
+                    for j, fila_j in df_validado.iterrows():
+                        if i >= j or fila_i["Fecha"] != fila_j["Fecha"]:
                             continue
-
-                        overlap = not (fila_i["Hora_Fin"] <= fila_j["Hora_Inicio"] or fila_j["Hora_Fin"] <= fila_i["Hora_Inicio"])
-
+                        si, sf = fila_i["Hora_Inicio"], fila_i["Hora_Fin"]
+                        sj, sjf = fila_j["Hora_Inicio"], fila_j["Hora_Fin"]
+                        overlap = not (sf <= sj or sjf <= si)
                         if overlap:
                             if fila_i["Operario"] == fila_j["Operario"]:
-                                errores.append(f"👷‍♂️ El operario {fila_i['Operario']} tiene solapamiento horario entre máquinas en filas {i+1} y {j+1}.")
+                                errores.append(f"👷‍♂️ Solapamiento operario en filas {i+1} y {j+1}.")
                             if fila_i["Máquina"] == fila_j["Máquina"]:
-                                errores.append(f"🛠️ La máquina {fila_i['Máquina']} tiene solapamiento horario en filas {i+1} y {j+1}.")
+                                errores.append(f"🛠️ Solapamiento máquina en filas {i+1} y {j+1}.")
 
                 if errores:
                     for e in errores:
                         st.error(e)
                     st.stop()
 
-                for nueva in plan_dia:
-                    if nueva not in st.session_state.planificacion_definitiva:
-                        st.session_state.planificacion_definitiva.append(nueva)
+                if os.path.exists(programacion_path):
+                    df_existente = pd.read_csv(programacion_path)
+                else:
+                    df_existente = pd.DataFrame(columns=df_validado.columns)
 
-                st.session_state.planificacion_tmp = [fila for fila in st.session_state.planificacion_tmp if fila["Fecha"] != fecha_str]
-                st.success("✅ Asignaciones guardadas para el día actual.")
-
-                # Resetear la fecha y refrescar
-                if "fecha_dia" in st.session_state:
-                    del st.session_state["fecha_dia"]
-                    st.rerun()
-
-        # === MOSTRAR PLANIFICACIÓN ACUMULADA SIEMPRE ===
-        st.markdown("### 📋 Planificación acumulada (sin guardar)")
-
-        df_acumulado = pd.DataFrame(st.session_state.planificacion_definitiva)
-
-        if not df_acumulado.empty:
-            df_acumulado = df_acumulado.sort_values(by=["Fecha", "Máquina", "Hora_Inicio"])
-            st.dataframe(df_acumulado, use_container_width=True)
-
-                    # Botón para guardar planificación definitiva con validaciones completas
-        st.markdown("---")
-        st.subheader("💾 Guardar programación definitiva")
-
-        if st.button("💾 Guardar programación definitiva"):
-            errores = []
-            df_validado = df_acumulado.copy()
-
-            for i, fila_i in df_validado.iterrows():
-                for campo in ["Fecha", "Máquina", "Referencia", "Operario", "Hora_Inicio", "Hora_Fin"]:
-                    if pd.isna(fila_i[campo]) or fila_i[campo] == "":
-                        errores.append(f"❌ La fila {i+1} tiene el campo '{campo}' vacío.")
-
-                if fila_i["Hora_Inicio"] >= fila_i["Hora_Fin"]:
-                    errores.append(f"🕒 La hora de inicio debe ser menor que la de fin en la fila {i+1}.")
-
-                for j, fila_j in df_validado.iterrows():
-                    if i >= j or fila_i["Fecha"] != fila_j["Fecha"]:
-                        continue
-
-                    ini_i, fin_i = fila_i["Hora_Inicio"], fila_i["Hora_Fin"]
-                    ini_j, fin_j = fila_j["Hora_Inicio"], fila_j["Hora_Fin"]
-
-                    overlap = not (fin_i <= ini_j or fin_j <= ini_i)
-
-                    if overlap:
-                        if fila_i["Operario"] == fila_j["Operario"]:
-                            errores.append(f"👷‍♂️ El operario {fila_i['Operario']} tiene solapamiento el {fila_i['Fecha']} entre filas {i+1} y {j+1}.")
-                        if fila_i["Máquina"] == fila_j["Máquina"]:
-                            errores.append(f"🛠️ La máquina {fila_i['Máquina']} tiene solapamiento el {fila_i['Fecha']} entre filas {i+1} y {j+1}.")
-
-                similares = df_validado[
-                    (df_validado["Fecha"] == fila_i["Fecha"]) &
-                    (df_validado["Máquina"] == fila_i["Máquina"]) &
-                    (df_validado["Operario"] == fila_i["Operario"]) &
-                    (df_validado["Referencia"] == fila_i["Referencia"]) &
-                    (df_validado.index != i)
-                ]
-                for _, fila_j in similares.iterrows():
-                    if fila_j["Hora_Fin"] == fila_i["Hora_Inicio"]:
-                        errores.append(f"🔁 Franja continua sospechosa en {fila_i['Fecha']} para máquina {fila_i['Máquina']} y operario {fila_i['Operario']}. Considera unirlas.")
-
-            if errores:
-                for e in errores:
-                    st.error(e)
-                st.stop()
-
-            # Guardar en CSV
-            if os.path.exists(programacion_path):
-                df_guardado = pd.read_csv(programacion_path)
-                if "Hora_Inicio" in df_guardado.columns:
-                    df_guardado["Hora_Inicio"] = pd.to_datetime(df_guardado["Hora_Inicio"], errors="coerce").dt.strftime("%H:%M")
-                    df_guardado["Hora_Fin"] = pd.to_datetime(df_guardado["Hora_Fin"], errors="coerce").dt.strftime("%H:%M")
-            else:
-                df_guardado = pd.DataFrame(columns=df_validado.columns)
-
-            df_nuevo = df_validado.copy()
-            df_nuevo["Hora_Inicio"] = df_nuevo["Hora_Inicio"].astype(str)
-            df_nuevo["Hora_Fin"] = df_nuevo["Hora_Fin"].astype(str)
-
-            df_final = pd.concat([df_guardado, df_nuevo], ignore_index=True)
-            df_final.drop_duplicates(subset=["Fecha", "Máquina", "Hora_Inicio", "Hora_Fin"], keep="last", inplace=True)
-            df_final.to_csv(programacion_path, index=False)
-
-            st.success("✅ Programación guardada exitosamente.")
-            st.session_state.planificacion_definitiva.clear()
-
+                df_nuevo = df_validado.copy()
+                df_nuevo["Hora_Inicio"] = df_nuevo["Hora_Inicio"].astype(str)
+                df_nuevo["Hora_Fin"] = df_nuevo["Hora_Fin"].astype(str)
+                df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
+                df_final.to_csv(programacion_path, index=False)
+                st.success("✅ Programación guardada.")
+                st.session_state.planificacion_definitiva.clear()
+                st.session_state.planificacion_tmp.clear()
+                st.rerun()
