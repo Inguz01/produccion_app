@@ -8,6 +8,9 @@ from datetime import time as dtime
 from datetime import datetime
 import streamlit.components.v1 as components
 from datetime import date
+import base64
+from io import BytesIO
+from fpdf import FPDF
 
 #st.set_page_config(page_title="Rubber Soft", layout="wide")
 
@@ -30,6 +33,86 @@ if os.path.exists("datos/style_oscuro.css"):
 if os.path.exists("datos/style.css"):
     with open("datos/style.css") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+# =========================
+# FUNCIONES AUXILIARES
+# =========================
+
+
+def generar_pdf_ficha(ficha, logo_path=None, imagen_producto=None, output_path="ficha_tecnica.pdf"):
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.add_page()
+
+    # ===== ENCABEZADO =====
+    if logo_path and os.path.exists(logo_path):
+        pdf.image(logo_path, 10, 8, 33)  # Logo
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "FICHA TÉCNICA DE PRODUCTO", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 10, f"Versión: {ficha['Versión']}   Código: FTP-{ficha.name:03d}", ln=True, align="C")
+
+    pdf.ln(10)
+
+    # ===== DATOS GENERALES =====
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Datos Generales", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.cell(0, 8, f"Fecha: {ficha['Fecha']}", ln=True)
+    pdf.cell(0, 8, f"Cliente: {ficha['Cliente']}", ln=True)
+    pdf.cell(0, 8, f"Referencia: {ficha['Referencia']}", ln=True)
+    pdf.cell(0, 8, f"Fórmula: {ficha['Fórmula']}", ln=True)
+
+    pdf.ln(8)
+
+    # ===== IMAGEN DEL PRODUCTO =====
+    if imagen_producto and os.path.exists(imagen_producto):
+        pdf.image(imagen_producto, x=140, y=60, w=50)
+
+    # ===== ESPECIFICACIONES DEL PRODUCTO =====
+    pdf.set_font("Arial", "B", 14)
+    pdf.ln(10)
+    pdf.cell(0, 10, "Especificaciones del Producto", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8,
+        f"Color: {ficha['Color']}\n"
+        f"Laminado: {ficha['Laminado']} mm\n"
+        f"Peso: {ficha['Peso']} gr\n"
+        f"Dureza: {ficha['Dureza']}\n"
+        f"Cavidades: {ficha['Cavidades']}"
+    )
+
+    # ===== PROCESO =====
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Especificaciones del Proceso", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8,
+        f"Temperatura: {ficha['Temperatura']}\n"
+        f"Presión: {ficha['Presión']}\n"
+        f"Vulcanizado: {ficha['Vulcanizado']} min\n"
+        f"Tacado: {ficha['Tacado']} min\n"
+        f"Tiempo Total: {ficha['TiempoTotal']} min\n"
+        f"Promedio por Hora: {ficha['PromedioHora']:.2f} uds"
+    )
+
+    # ===== CORTE =====
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Datos de Corte", ln=True)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8,
+        f"Tiempo por unidad: {ficha['TiempoCorteUnidad']} min\n"
+        f"Corte por Hora: {ficha['CorteHora']:.2f} uds\n"
+        f"Corte Diario Estimado: {ficha['CorteDiario']:.2f} uds"
+    )
+
+    # ===== OBSERVACIONES =====
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Observaciones", ln=True)
+    pdf.set_font("Arial", size=12)
+    observaciones = ficha["Observaciones"] if str(ficha["Observaciones"]).lower() != "nan" else "Sin observaciones"
+    pdf.multi_cell(0, 8, observaciones)
+
+    pdf.output(output_path)
+    return output_path
 
 # Inicializar sesión
 if "logueado" not in st.session_state:
@@ -112,11 +195,22 @@ else:
         lista_clientes = []
 
 # =======================
-# GESTIÓN DE CLIENTES
+# GESTIÓN DE CLIENTES (AJUSTADO)
 # =======================
 
     if menu == "Registrar Cliente" and st.session_state["rol"] == "Administrador":
-       
+        # Forzar vista más ancha solo para esta sección
+        st.markdown("""
+            <style>
+            .block-container {
+                max-width: 95% !important;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+
         st.header("📋 Gestión de Clientes")
 
         clientes_csv_path = "datos/clientes.csv"
@@ -135,9 +229,11 @@ else:
         editar_nit = st.session_state.get("editar_nit", None)
         eliminar_nit = st.session_state.get("eliminar_nit", None)
 
+        # Buscar cliente
         st.markdown("### 🔍 Buscar Cliente")
         filtro_busqueda = st.text_input("Buscar por nombre o NIT")
 
+        # Configuración de paginación
         st.markdown("### 📄 Clientes por página")
         clientes_por_pagina = st.selectbox("Clientes por página", [10, 20, 50], index=0)
 
@@ -158,23 +254,27 @@ else:
         st.markdown("### 🗂️ Lista de Clientes")
         if not pagina_df.empty:
             for i, row in pagina_df.iterrows():
-                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([2, 2, 2, 2, 2, 2, 0.5, 0.5])
+                # Ajustamos columnas para una vista más ancha
+                col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([3, 3, 3, 3, 3, 3, 3, 3, 1, 1])
                 col1.write(row["Cliente"])
                 col2.write(row["NIT"])
                 col3.write(row["Dirección"])
                 col4.write(row["Teléfono"])
                 col5.write(row.get("Contacto1", ""))
                 col6.write(row.get("Correo1", ""))
-                if col7.button("✏️", key=f"editar_{row['NIT']}"):
+                col7.write(row.get("Contacto2", ""))
+                col8.write(row.get("Correo2", ""))
+                if col9.button("✏️", key=f"editar_{row['NIT']}"):
                     st.session_state["editar_nit"] = row["NIT"]
                     st.session_state["mostrar_form"] = True
                     st.rerun()
-                if col8.button("🗑️", key=f"eliminar_{row['NIT']}"):
+                if col10.button("🗑️", key=f"eliminar_{row['NIT']}"):
                     st.session_state["eliminar_nit"] = row["NIT"]
                     st.rerun()
         else:
             st.info("No hay clientes registrados aún.")
 
+        # Paginación
         colpag1, colpag2, colpag3 = st.columns([1, 2, 1])
         with colpag1:
             if st.button("⬅️ Anterior") and pagina_actual > 1:
@@ -187,22 +287,66 @@ else:
                 st.session_state["pagina_clientes"] = pagina_actual + 1
                 st.rerun()
 
-        # Confirmar eliminación
+# =======================
+# Validar dependencias del cliente
+# =======================
+        def cliente_tiene_dependencias(nit, nombre_cliente):
+            dependencias = []
+
+            # Validar en fichas técnicas por nombre del cliente
+            if os.path.exists("datos/fichas_tecnicas.csv"):
+                df_fichas = pd.read_csv("datos/fichas_tecnicas.csv")
+                if "Cliente" in df_fichas.columns and nombre_cliente in df_fichas["Cliente"].astype(str).tolist():
+                    dependencias.append("Fichas Técnicas")
+
+            # Validar en órdenes de producción por NIT
+            if os.path.exists("datos/ordenes_produccion.csv"):
+                df_op = pd.read_csv("datos/ordenes_produccion.csv")
+                if "NIT" in df_op.columns and nit in df_op["NIT"].astype(str).tolist():
+                    dependencias.append("Órdenes de Producción")
+
+            # Validar en órdenes de compra por NIT
+            if os.path.exists("datos/ordenes_compra.csv"):
+                df_oc = pd.read_csv("datos/ordenes_compra.csv")
+                if "NIT" in df_oc.columns and nit in df_oc["NIT"].astype(str).tolist():
+                    dependencias.append("Órdenes de Compra")
+
+            return dependencias
+
+
+# =======================
+# Confirmación y validación antes de eliminar
+# =======================
         if eliminar_nit:
-            st.warning(f"¿Estás seguro de eliminar el cliente con NIT {eliminar_nit}?")
-            confirmar = st.checkbox("☑️ Confirmar eliminación")
-            if confirmar:
-                clientes_df = clientes_df[clientes_df["NIT"] != eliminar_nit]
-                clientes_df.to_csv(clientes_csv_path, index=False)
-                st.success(f"Cliente con NIT {eliminar_nit} eliminado correctamente.")
-                del st.session_state["eliminar_nit"]
-                st.rerun()
+            cliente_row = clientes_df[clientes_df["NIT"] == eliminar_nit]
+            if not cliente_row.empty:
+                nombre_cliente = cliente_row.iloc[0]["Cliente"]
+            else:
+                nombre_cliente = ""
+
+            dependencias = cliente_tiene_dependencias(eliminar_nit, nombre_cliente)
+
+            if dependencias:
+                st.error(f"❌ No se puede eliminar el cliente porque tiene registros asociados: {', '.join(dependencias)}")
+                if st.button("Aceptar"):
+                    del st.session_state["eliminar_nit"]
+                    st.rerun()
+            else:
+                st.warning(f"¿Estás seguro de eliminar el cliente con NIT {eliminar_nit}?")
+                confirmar = st.checkbox("☑️ Confirmar eliminación")
+                if confirmar:
+                    clientes_df = clientes_df[clientes_df["NIT"] != eliminar_nit]
+                    clientes_df.to_csv(clientes_csv_path, index=False)
+                    st.success(f"✅ Cliente con NIT {eliminar_nit} eliminado correctamente.")
+                    del st.session_state["eliminar_nit"]
+                    st.rerun()
 
         st.markdown("---")
         if st.button("➕ Registrar Cliente"):
             st.session_state["mostrar_form"] = True
             st.session_state["editar_nit"] = None
 
+        # Formulario de registro / edición
         if st.session_state.get("mostrar_form") or editar_nit:
             st.subheader("🧾 Formulario Cliente")
 
@@ -229,6 +373,7 @@ else:
                 submitted = st.form_submit_button("💾 Guardar Cliente")
 
                 if submitted:
+                    # ✅ Validaciones originales
                     if not all([nombre, nit, direccion, telefono, contacto1, correo1]):
                         st.error("⚠️ Todos los campos excepto Contacto 2 y Correo 2 son obligatorios.")
                     elif not nit.isdigit() or len(nit) != 10:
@@ -264,7 +409,7 @@ else:
                         clientes_df.to_csv(clientes_csv_path, index=False)
                         st.session_state["mostrar_form"] = False
                         st.session_state["editar_nit"] = None
-                        st.experimental_rerun()
+                        st.rerun()
 
 # =======================
 # REGISTRAR FICHA TÉCNICA
@@ -275,7 +420,11 @@ else:
         if os.path.exists(fichas_path):
             fichas = pd.read_csv(fichas_path)
         else:
-            fichas = pd.DataFrame()
+            fichas = pd.DataFrame(columns=[
+                "Referencia","Versión","Fecha","Cliente","Fórmula","Color","Laminado","Imagen",
+                "Dureza","Temperatura","Presión","Peso","Cavidades","Tacado","Vulcanizado",
+                "TiempoTotal","PromedioHora","TiempoCorteUnidad","CorteHora","CorteDiario","Jornada","Observaciones"
+            ])
 
         # Estado para reinicio
         if "ficha_guardada" not in st.session_state:
@@ -290,36 +439,61 @@ else:
                 st.session_state["ficha_guardada"] = False
                 st.rerun()
         else:
-            st.subheader("📋 Datos generales")
-            fecha = st.date_input("Fecha", value=date.today(), key="f_fecha")
-            cliente = st.selectbox("Cliente", lista_clientes, key="f_cliente")
-            referencia = st.text_input("Referencia", key="f_referencia")
-            formula = st.text_input("Fórmula", key="f_formula")
-            color = st.text_input("Color", key="f_color")
-            laminado = st.number_input("Laminado (mm)", min_value=0.01, key="f_laminado")
-            imagen = st.file_uploader("Imagen del producto (JPG/PNG)", type=["jpg", "jpeg", "png"], key="f_imagen")
+            # Cargar lista de fórmulas si existe
+            formulas_lista = []
+            if os.path.exists("datos/formulas.csv"):
+                df_formulas = pd.read_csv("datos/formulas.csv")
+                formulas_lista = df_formulas["Nombre_Formula"].dropna().unique().tolist()
 
-            st.subheader("⚙️ Especificaciones técnicas")
-            dureza = st.text_input("Dureza", key="f_dureza")
-            temperatura = st.text_input("Temperatura (°C)", key="f_temp")
-            presion = st.text_input("Presión (LB)", key="f_presion")
-            peso = st.number_input("Peso del producto (gr)", min_value=0.5, key="f_peso")
-            cavidades = st.number_input("Cavidades", min_value=1, key="f_cavidades")
+            # === Sección 1: Datos Generales ===
+            with st.expander("📋 Datos generales", expanded=True):
+                fecha = st.date_input("Fecha", value=date.today(), key="f_fecha")
+                cliente = st.selectbox("Cliente", lista_clientes, key="f_cliente")
 
-            st.subheader("⏱️ Tiempos de proceso")
-            tiempo_tacado = st.number_input("Tiempo de tacado (min)", min_value=1.00, step=0.1, key="f_tacado")
-            tiempo_vulcanizado = st.number_input("Tiempo de vulcanizado (min)", min_value=0.50, step=0.1, key="f_vulcanizado")
-            tiempo_total = tiempo_tacado + tiempo_vulcanizado
-            promedio_hora = (60 / tiempo_total) * cavidades if tiempo_total > 0 else 0
+                # Mostrar referencias existentes para el cliente seleccionado
+                if cliente:
+                    referencias_cliente = fichas[fichas["Cliente"] == cliente]["Referencia"].unique().tolist()
+                    if referencias_cliente:
+                        st.info(f"Referencias ya registradas para este cliente: {', '.join(referencias_cliente)}")
+                    else:
+                        st.info("Este cliente no tiene referencias registradas aún.")
 
-            st.subheader("✂️ Corte")
-            tiempo_corte = st.number_input("Tiempo de corte por unidad (min)", min_value=0.5, step=0.1, key="f_corte")
-            cortadas_hora = 60 / tiempo_corte if tiempo_corte > 0 else 0
-            jornada = st.number_input("Horas jornada", value=8, min_value=1, max_value=24, key="f_jornada")
-            corte_dia = cortadas_hora * jornada
+                referencia = st.text_input("Referencia", key="f_referencia")
+                if formulas_lista:
+                    formula = st.selectbox("Fórmula", formulas_lista, key="f_formula")
+                else:
+                    formula = st.text_input("Fórmula", key="f_formula")
+                color = st.text_input("Color", key="f_color")
+                laminado = st.number_input("Laminado (mm)", min_value=0.01, key="f_laminado")
+                imagen = st.file_uploader("Imagen del producto (JPG/PNG)", type=["jpg", "jpeg", "png"], key="f_imagen")
 
-            st.subheader("📝 Observaciones")
-            observaciones = st.text_area("Observaciones", key="f_obs")
+            # === Sección 2: Especificaciones Técnicas ===
+            with st.expander("⚙️ Especificaciones técnicas", expanded=True):
+                dureza = st.text_input("Dureza", key="f_dureza")
+                temperatura = st.text_input("Temperatura (°C)", key="f_temp")
+                presion = st.text_input("Presión (LB)", key="f_presion")
+                peso = st.number_input("Peso del producto (gr)", min_value=0.5, key="f_peso")
+                cavidades = st.number_input("Cavidades", min_value=1, key="f_cavidades")
+
+            # === Sección 3: Tiempos de proceso ===
+            with st.expander("⏱️ Tiempos de proceso", expanded=True):
+                tiempo_tacado = st.number_input("Tiempo de tacado (min)", min_value=1.00, step=0.1, key="f_tacado")
+                tiempo_vulcanizado = st.number_input("Tiempo de vulcanizado (min)", min_value=0.50, step=0.1, key="f_vulcanizado")
+                tiempo_total = tiempo_tacado + tiempo_vulcanizado
+                promedio_hora = (60 / tiempo_total) * cavidades if tiempo_total > 0 else 0
+                st.write(f"**Tiempo total:** {tiempo_total:.2f} min | **Promedio por hora:** {promedio_hora:.2f}")
+
+            # === Sección 4: Corte ===
+            with st.expander("✂️ Corte", expanded=False):
+                tiempo_corte = st.number_input("Tiempo de corte por unidad (min)", min_value=0.5, step=0.1, key="f_corte")
+                cortadas_hora = 60 / tiempo_corte if tiempo_corte > 0 else 0
+                jornada = st.number_input("Horas jornada", value=8, min_value=1, max_value=24, key="f_jornada")
+                corte_dia = cortadas_hora * jornada
+                st.write(f"**Cortes por hora:** {cortadas_hora:.2f} | **Corte diario:** {corte_dia:.2f}")
+
+            # === Sección 5: Observaciones ===
+            with st.expander("📝 Observaciones", expanded=False):
+                observaciones = st.text_area("Observaciones", key="f_obs")
 
             if st.button("💾 Guardar Ficha Técnica"):
                 campos_texto = [referencia, formula, color, dureza, temperatura, presion]
@@ -332,52 +506,65 @@ else:
                 elif imagen is None:
                     st.error("❌ Debe adjuntar una imagen del producto.")
                 else:
-                    if "Versión" not in fichas.columns:
-                        fichas["Versión"] = None
-                    versiones = fichas[fichas["Referencia"] == referencia]["Versión"].tolist()
-                    nueva_version = f"V{len(versiones)+1}"
+                    # Validar duplicado Cliente + Referencia
+                    
+                    ref_normalizada = referencia.strip().lower()
+                    cliente_normalizado = cliente.strip().lower()
 
-                    # Guardar imagen
-                    img_name = f"imagen_{referencia}_{nueva_version}.png"
-                    with open(f"datos/{img_name}", "wb") as f:
-                        f.write(imagen.read())
+                    # Normalizar DataFrame
+                    fichas["Cliente_norm"] = fichas["Cliente"].astype(str).str.strip().str.lower()
+                    fichas["Referencia_norm"] = fichas["Referencia"].astype(str).str.strip().str.lower()
 
-                    nueva_ficha = pd.DataFrame([{
-                        "Referencia": referencia,
-                        "Versión": nueva_version,
-                        "Fecha": fecha,
-                        "Cliente": cliente,
-                        "Fórmula": formula,
-                        "Color": color,
-                        "Laminado": laminado,
-                        "Imagen": img_name,
-                        "Dureza": dureza,
-                        "Temperatura": temperatura,
-                        "Presión": presion,
-                        "Peso": peso,
-                        "Cavidades": cavidades,
-                        "Tacado": tiempo_tacado,
-                        "Vulcanizado": tiempo_vulcanizado,
-                        "TiempoTotal": tiempo_total,
-                        "PromedioHora": promedio_hora,
-                        "TiempoCorteUnidad": tiempo_corte,
-                        "CorteHora": cortadas_hora,
-                        "CorteDiario": corte_dia,
-                        "Jornada": jornada,
-                        "Observaciones": observaciones
-                    }])
+                    duplicado = fichas[(fichas["Cliente_norm"] == cliente_normalizado) & (fichas["Referencia_norm"] == ref_normalizada)]
 
-                    fichas = pd.concat([fichas, nueva_ficha], ignore_index=True)
-                    fichas.to_csv(fichas_path, index=False)
+                    if not duplicado.empty:
+                        st.error("❌ Ya existe una ficha técnica para este cliente con la misma referencia.")
+                    else:
+                        if "Versión" not in fichas.columns:
+                            fichas["Versión"] = None
+                        versiones = fichas[fichas["Referencia"] == referencia]["Versión"].tolist()
+                        nueva_version = f"V{len(versiones)+1}"
 
-                    st.session_state["ficha_guardada"] = True
-                    st.rerun()
+                        # Guardar imagen
+                        img_name = f"imagen_{referencia}_{nueva_version}.png"
+                        with open(f"datos/{img_name}", "wb") as f:
+                            f.write(imagen.read())
+
+                        nueva_ficha = pd.DataFrame([{
+                            "Referencia": referencia,
+                            "Versión": nueva_version,
+                            "Fecha": fecha,
+                            "Cliente": cliente,
+                            "Fórmula": formula,
+                            "Color": color,
+                            "Laminado": laminado,
+                            "Imagen": img_name,
+                            "Dureza": dureza,
+                            "Temperatura": temperatura,
+                            "Presión": presion,
+                            "Peso": peso,
+                            "Cavidades": cavidades,
+                            "Tacado": tiempo_tacado,
+                            "Vulcanizado": tiempo_vulcanizado,
+                            "TiempoTotal": tiempo_total,
+                            "PromedioHora": promedio_hora,
+                            "TiempoCorteUnidad": tiempo_corte,
+                            "CorteHora": cortadas_hora,
+                            "CorteDiario": corte_dia,
+                            "Jornada": jornada,
+                            "Observaciones": observaciones
+                        }])
+
+                        fichas = pd.concat([fichas, nueva_ficha], ignore_index=True)
+                        fichas.to_csv(fichas_path, index=False)
+
+                        st.session_state["ficha_guardada"] = True
+                        st.rerun()
             
 # ==== Visualizar Ficha Técnica ====
-
     if "modo_version" not in st.session_state:
         st.session_state["modo_version"] = False
-    
+
     if "ficha_guardada" not in st.session_state:
         st.session_state["ficha_guardada"] = False
 
@@ -407,14 +594,17 @@ else:
             st.stop()
 
         referencia_sel = st.selectbox("Selecciona una referencia", referencias)
-        ficha = fichas_cliente[fichas_cliente["Referencia"].str.lower() == referencia_sel.lower()]
-        if ficha.empty:
+
+        # Todas las versiones de esa referencia
+        fichas_ref = fichas_cliente[fichas_cliente["Referencia"].str.lower() == referencia_sel.lower()]
+        if fichas_ref.empty:
             st.warning("⚠️ No hay ficha técnica registrada para esta referencia.")
             st.stop()
 
-        ficha = ficha.sort_values("Versión", ascending=False).iloc[0]
+        # Última versión
+        ficha = fichas_ref.sort_values("Versión", ascending=False).iloc[0]
 
-# ENCABEZADO VISUAL
+        # === Visualización actual (NO se toca, solo corrige observaciones) ===
         st.markdown("---")
         col1, col2 = st.columns([1, 5])
         with col1:
@@ -466,11 +656,71 @@ else:
 
         st.markdown("---")
         st.markdown("### 📝 Observaciones")
-        st.write(ficha["Observaciones"])
+        obs = str(ficha["Observaciones"]).strip()
+        st.write(obs if obs.lower() != "nan" and obs else "Sin observaciones")
 
-        if st.session_state["ficha_guardada"]:
-            st.success("✅ Nueva versión registrada exitosamente.")
-            st.session_state["ficha_guardada"] = False
+        # === AgGrid con todas las versiones ===
+        st.markdown("### 📋 Versiones registradas para esta referencia")
+
+        # Reducir columnas para vista más limpia
+        fichas_ref_display = fichas_ref[["Versión", "Fecha", "Referencia", "Dureza","Temperatura", "Presión", "TiempoTotal"]].copy()
+        fichas_ref_display["Fecha"] = fichas_ref_display["Fecha"].astype(str)
+
+        # Configuración de AgGrid
+        gb = GridOptionsBuilder.from_dataframe(fichas_ref_display)
+        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=5)
+        gb.configure_default_column(resizable=True, filter=True, sortable=True)
+        gb.configure_selection('single', use_checkbox=True)
+        gb.configure_grid_options(domLayout='normal')
+        grid_options = gb.build()
+
+        grid_response = AgGrid(
+            fichas_ref_display,
+            gridOptions=grid_options,
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            fit_columns_on_grid_load=True,
+            height=300
+        )
+
+        selected = grid_response["selected_rows"]
+
+        # Botones de acciones
+        if selected is not None and len(selected) > 0:
+            selected_ficha = selected[0]
+            col1, col2, col3 = st.columns(3)
+
+            # === BOTÓN PARA DESCARGAR PDF ===
+            with col1:
+                if st.button("📄 Descargar PDF"):
+                    logo_path = "datos/logo_empresa.png" if os.path.exists("datos/logo_empresa.png") else None
+                    imagen_producto = f"datos/{selected_ficha['Imagen']}" if os.path.exists(f"datos/{selected_ficha['Imagen']}") else None
+
+                    pdf_path = generar_pdf_ficha(selected_ficha, logo_path, imagen_producto)
+
+                    with open(pdf_path, "rb") as pdf_file:
+                        st.download_button(
+                            label="⬇️ Descargar Ficha Técnica",
+                            data=pdf_file,
+                            file_name=f"Ficha_{selected_ficha['Referencia']}_{selected_ficha['Versión']}.pdf",
+                            mime="application/pdf"
+                        )
+
+            if st.session_state["rol"] == "Administrador":
+                with col2:
+                    if st.button("🗑️ Eliminar ficha seleccionada"):
+                        img_path = f"datos/{selected_ficha['Imagen']}"
+                        fichas = fichas.drop(fichas[fichas.index == int(selected_ficha['_selectedRowNodeInfo']['nodeRowIndex'])].index)
+                        fichas.to_csv(fichas_path, index=False)
+                        if os.path.exists(img_path):
+                            os.remove(img_path)
+                        st.success(f"Ficha {selected_ficha['Referencia']} {selected_ficha['Versión']} eliminada.")
+                        st.rerun()
+                with col3:
+                    if st.button("🔁 Generar nueva versión"):
+                        st.session_state["modo_version"] = True
+                        st.rerun()
+
+
 
  # ========= Generar Nueva Versión (solo administrador) =========
         if "modo_version" not in st.session_state:
