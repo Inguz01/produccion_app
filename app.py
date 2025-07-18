@@ -804,21 +804,38 @@ else:
                 col1, col2, col3 = st.columns(3)
 
                 # Botón PDF
+                # Detectar cambio de ficha seleccionada
+                if "last_selected" not in st.session_state:
+                    st.session_state["last_selected"] = None
+
+                current_selected = f"{selected_ficha['Referencia']}_{selected_ficha['Versión']}"
+
+                if st.session_state["last_selected"] != current_selected:
+                    st.session_state["last_selected"] = current_selected
+                    st.session_state["pdf_ready"] = None  # Reset PDF cuando cambia la selección
+
+                # Botón Generar PDF y Descargar
                 with col1:
-                    if st.button("Generar PDF", key="pdf_btn"):
+                    if st.button("📄 Generar PDF", key="pdf_btn"):
                         pdf_path = generar_pdf_ficha(
                             selected_ficha,
-                            fichas_ref,  # Todas las versiones de esta referencia
+                            fichas_ref,
                             output_path="datos/ficha_tecnica.pdf",
-                            logo_path="logo.png"
+                            logo_path="datos/logo.png"
                         )
-                        with open(pdf_path, "rb") as f:
+                        st.session_state["pdf_ready"] = pdf_path  # Guardar PDF generado
+
+                    # Mostrar botón de descarga si PDF está listo
+                    if st.session_state.get("pdf_ready"):
+                        with open(st.session_state["pdf_ready"], "rb") as f:
                             st.download_button(
                                 label="⬇️ Descargar PDF",
                                 data=f,
                                 file_name=f"Ficha_{selected_ficha['Referencia']}_{selected_ficha['Versión']}.pdf",
-                                mime="application/pdf"
+                                mime="application/pdf",
+                                key="download_pdf_btn"
                             )
+
 
                 # Botón eliminar (solo admin)
                 if st.session_state["rol"] == "Administrador":
@@ -1236,25 +1253,49 @@ else:
         else:
             detalle_oc["Producido"] = detalle_oc["Producido"].fillna(0)
 
-        fichas_df = pd.read_csv("datos/fichas_tecnicas.csv")
-
         clientes_disponibles = ordenes_oc["Cliente"].unique().tolist()
         cliente_sel = st.selectbox("Selecciona el cliente", clientes_disponibles)
 
         ocs_cliente = ordenes_oc[ordenes_oc["Cliente"] == cliente_sel]
-        detalle_cliente = detalle_oc[detalle_oc["ID_Orden"].isin(ocs_cliente["ID_Orden"])]
-        detalle_cliente = detalle_cliente.merge(
+        detalle_cliente = detalle_oc.merge(
             ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
-            on="ID_Orden", how="left"
+            on="ID_Orden", how="inner"
         )
-        detalle_cliente["Pendiente"] = detalle_cliente["Cantidad"] - detalle_cliente["Producido"]
+        detalle_cliente = detalle_cliente[detalle_cliente["ID_Orden"].isin(ocs_cliente["ID_Orden"])]
 
-        # Excluir combinaciones ya incluidas en una OP
+        
+        # Calcular pendiente considerando lo ya programado en OP
+        if os.path.exists(detalle_op_path):
+            detalle_op_df = pd.read_csv(detalle_op_path)
+            programado_por_ref = (
+                detalle_op_df.groupby(["Referencia", "OC_Origen", "Fecha_Entrega"])["Cantidad_Producir"]
+                .sum()
+                .reset_index()
+                .rename(columns={"Cantidad_Producir": "Programado"})
+            )
+
+            detalle_cliente = detalle_cliente.merge(
+                programado_por_ref,
+                left_on=["Referencia", "Numero_OC_Cliente", "Fecha_Entrega"],
+                right_on=["Referencia", "OC_Origen", "Fecha_Entrega"],
+                how="left"
+            )
+            detalle_cliente["Programado"] = detalle_cliente["Programado"].fillna(0)
+        else:
+            detalle_cliente["Programado"] = 0
+
+        detalle_cliente["Pendiente"] = detalle_cliente["Cantidad"] - detalle_cliente["Producido"] - detalle_cliente["Programado"]
+        
+        # ✅ Mantener solo pendientes mayores a 0
+        detalle_cliente = detalle_cliente[detalle_cliente["Pendiente"] > 0]
+
+
+        # Excluir combinaciones ya incluidas en OP (si aplica)
         if os.path.exists(detalle_op_path):
             detalle_op_df = pd.read_csv(detalle_op_path)
             detalle_cliente["clave"] = (
                 detalle_cliente["Referencia"].astype(str) + "|" +
-                detalle_cliente["Numero_OC_Cliente"].astype(str) + "|" +
+                detalle_cliente["ID_Orden"].astype(str) + "|" +
                 detalle_cliente["Fecha_Entrega"].astype(str)
             )
             detalle_op_df["clave"] = (
@@ -1267,7 +1308,7 @@ else:
 
         detalle_cliente = detalle_cliente[detalle_cliente["Pendiente"] > 0]
 
-        resumen = detalle_cliente.groupby(["Referencia", "Numero_OC_Cliente", "Fecha_Entrega"]).agg({
+        resumen = detalle_cliente.groupby(["Referencia", "ID_Orden", "Numero_OC_Cliente", "Fecha_Entrega"]).agg({
             "Pendiente": "sum"
         }).reset_index()
 
@@ -1277,55 +1318,63 @@ else:
             st.stop()
         else:
             st.subheader("📦 Referencias pendientes por generar una OP")
-            st.dataframe(resumen.rename(columns={"Numero_OC_Cliente": "OC"}))
+            st.dataframe(resumen.rename(columns={"ID_Orden": "OC"}))
 
         st.subheader("➕ Selección de referencias para producir")
         st.markdown("Selecciona las referencias que deseas producir. Por defecto se prellena el total pendiente.")
 
-        with st.form("form_op"):
-            seleccionadas = []
-            for _, fila in resumen.iterrows():
-                ref = fila["Referencia"]
-                oc = fila["Numero_OC_Cliente"]
-                fecha = fila["Fecha_Entrega"]
-                pendiente = int(fila["Pendiente"])
+        seleccionadas = []
 
-                clave = f"{ref}_{oc}_{fecha}"
-                col1, col2 = st.columns([4, 2])
+        for _, fila in resumen.iterrows():
+            ref = fila["Referencia"]
+            oc = fila["Numero_OC_Cliente"]
+            fecha = fila["Fecha_Entrega"]
+            pendiente = int(fila["Pendiente"])
 
-                with col1:
-                    seleccionado = st.checkbox(
-                        f"🔹 {ref} (OC: {oc}, entrega: {fecha})",
-                        key=f"check_{clave}"
-                    )
-                with col2:
-                    cantidad = st.number_input(
-                        "Cantidad a producir",
-                        min_value=0,
-                        max_value=pendiente,
-                        value=pendiente if seleccionado else 0,
-                        step=1,
-                        key=f"input_{clave}",
-                        disabled=not seleccionado
-                    )
+            clave = f"{ref}_{oc}_{fecha}"
+            col1, col2 = st.columns([4, 2])
 
-                if seleccionado and cantidad > 0:
-                    seleccionadas.append({
-                        "Referencia": ref,
-                        "Cantidad_Seleccionada": cantidad,
-                        "OC": oc,
-                        "Fecha_Entrega": fecha
-                    })
+            # Checkbox para seleccionar
+            with col1:
+                seleccionado = st.checkbox(
+                    f"🔹 {ref} (OC: {oc}, entrega: {fecha}, pendiente: {pendiente})",
+                    key=f"check_{clave}"
+                )
 
-            submit_op = st.form_submit_button("✅ Registrar Orden de Producción")
+            # Campo para la cantidad
+            with col2:
+                cantidad = st.number_input(
+                    "Cantidad a producir",
+                    min_value=0,
+                    max_value=pendiente,
+                    value=pendiente if seleccionado else 0,
+                    step=1,
+                    key=f"input_{clave}",
+                    disabled=not seleccionado
+                )
 
-            if submit_op:
-                if not seleccionadas:
-                    st.warning("⚠️ Debes seleccionar al menos una referencia con cantidad mayor a cero.")
-                    st.stop()
+            # Validación en tiempo real
+            if seleccionado and cantidad > pendiente:
+                st.warning(f"No puedes producir más de {pendiente} unidades para {ref}.")
+                cantidad = pendiente
 
+            if seleccionado and cantidad > 0:
+                seleccionadas.append({
+                    "Referencia": ref,
+                    "Cantidad_Seleccionada": cantidad,
+                    "OC": oc,
+                    "Fecha_Entrega": fecha
+                })
+
+        # Botón para registrar OP
+        if st.button("✅ Registrar Orden de Producción"):
+            if not seleccionadas:
+                st.warning("⚠️ Debes seleccionar al menos una referencia con cantidad mayor a cero.")
+            else:
+                # === Lógica para registrar la OP ===
                 op_df = pd.read_csv(op_path) if os.path.exists(op_path) else pd.DataFrame(columns=["ID_OP", "Cliente", "Fecha_Creacion", "Estado"])
                 nuevo_id = f"OP-{len(op_df)+1:04d}"
+
                 nueva_op = pd.DataFrame([{
                     "ID_OP": nuevo_id,
                     "Cliente": cliente_sel,
@@ -1335,6 +1384,7 @@ else:
                 op_df = pd.concat([op_df, nueva_op], ignore_index=True)
                 op_df.to_csv(op_path, index=False)
 
+                # Detalle OP
                 detalle_op_df = pd.read_csv(detalle_op_path) if os.path.exists(detalle_op_path) else pd.DataFrame(columns=[
                     "ID_OP", "Referencia", "Cantidad_Producir", "OC_Origen", "Cantidad_OC", "Fecha_Entrega"
                 ])
@@ -1353,10 +1403,12 @@ else:
                     ].sort_values("Fecha_Entrega")
 
                     restante = cantidad_total
-                    for _, fila in ref_detalle.iterrows():
+                    for idx, fila in ref_detalle.iterrows():
                         if restante <= 0:
                             break
                         cantidad_oc = min(fila["Pendiente"], restante)
+
+                        # Agregar a nuevas líneas
                         nuevas_lineas.append({
                             "ID_OP": nuevo_id,
                             "Referencia": ref,
@@ -1365,16 +1417,22 @@ else:
                             "Cantidad_OC": fila["Cantidad"],
                             "Fecha_Entrega": fecha_entrega
                         })
+
+                        # ✅ Actualizar el Producido en detalle_oc
+                        detalle_oc.loc[idx, "Producido"] += cantidad_oc
                         restante -= cantidad_oc
 
+                # Guardar en detalle OP
                 detalle_op_df = pd.concat([detalle_op_df, pd.DataFrame(nuevas_lineas)], ignore_index=True)
                 detalle_op_df.to_csv(detalle_op_path, index=False)
+
+                # ✅ Guardar cambios en detalle_oc (para reflejar los pendientes)
+                detalle_oc.to_csv(detalle_oc_path, index=False)
 
                 st.success(f"✅ Orden de Producción **{nuevo_id}** registrada exitosamente.")
                 st.info("Redirigiendo en 3 segundos...")
                 time.sleep(3)
                 st.rerun()
-
 
 # --------------------
 # PROGRAMAR PRODUCCIÓN

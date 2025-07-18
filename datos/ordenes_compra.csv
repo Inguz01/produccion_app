@@ -4,3 +4,5 @@ ID_Orden,Cliente,Fecha_Recepcion,Estado,Numero_OC_Cliente
 32,Grupo North,2025-06-30,Pendiente,12345
 33,Industrias Humcar,2025-07-01,Pendiente,OC3432
 34,Industria de Estufas Continental S.A,2025-07-16,Pendiente,OC-11111
+35,Industria de Estufas Continental S.A,2025-07-18,Pendiente,OC-23432
+36,Industria de Estufas Continental S.A,2025-07-18,Recibida,65765
