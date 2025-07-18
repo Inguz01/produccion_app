@@ -37,82 +37,180 @@ if os.path.exists("datos/style.css"):
 # =========================
 # FUNCIONES AUXILIARES
 # =========================
-
-
-def generar_pdf_ficha(ficha, logo_path=None, imagen_producto=None, output_path="ficha_tecnica.pdf"):
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
+def generar_pdf_ficha(ficha, fichas_ref, output_path="ficha_tecnica.pdf", logo_path=None):
+    pdf = FPDF()
     pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
 
-    # ===== ENCABEZADO =====
+    # Configuración básica
+    pdf.set_font("Arial", "B", 14)
+
+    # Logo (opcional)
     if logo_path and os.path.exists(logo_path):
-        pdf.image(logo_path, 10, 8, 33)  # Logo
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "FICHA TÉCNICA DE PRODUCTO", ln=True, align="C")
-    pdf.set_font("Arial", size=12)
-    pdf.cell(0, 10, f"Versión: {ficha['Versión']}   Código: FTP-{ficha.name:03d}", ln=True, align="C")
+        pdf.image(logo_path, 10, 8, 33)
+    pdf.cell(200, 10, "FICHA TÉCNICA DE PRODUCTO", ln=True, align="C")
 
+    # Encabezado
+    pdf.set_font("Arial", "", 12)
     pdf.ln(10)
+    pdf.cell(95, 10, f"Cliente: {ficha['Cliente']}", border=0)
+    pdf.cell(95, 10, f"Referencia: {ficha['Referencia']}", border=0, ln=True)
+    pdf.cell(95, 10, f"Versión: {ficha['Versión']}", border=0)
+    pdf.cell(95, 10, f"Fecha: {ficha['Fecha']}", border=0, ln=True)
+    if 'Fórmula' in ficha:
+        pdf.cell(95, 10, f"Fórmula: {ficha['Fórmula']}", border=0, ln=True)
 
-    # ===== DATOS GENERALES =====
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Datos Generales", ln=True)
-    pdf.set_font("Arial", size=12)
-    pdf.cell(0, 8, f"Fecha: {ficha['Fecha']}", ln=True)
-    pdf.cell(0, 8, f"Cliente: {ficha['Cliente']}", ln=True)
-    pdf.cell(0, 8, f"Referencia: {ficha['Referencia']}", ln=True)
-    pdf.cell(0, 8, f"Fórmula: {ficha['Fórmula']}", ln=True)
+    # Sección helper
+    def add_section(title):
+        pdf.set_fill_color(0, 102, 204)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, title, ln=True, align="L", fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Arial", "", 11)
 
-    pdf.ln(8)
+    pdf.ln(5)
 
-    # ===== IMAGEN DEL PRODUCTO =====
-    if imagen_producto and os.path.exists(imagen_producto):
-        pdf.image(imagen_producto, x=140, y=60, w=50)
+    # === Especificaciones del Producto ===
+    add_section("Especificaciones del Producto")
+    campos_producto = [
+        ("Color:", ficha["Color"]),
+        ("Laminado:", f"{ficha['Laminado']} mm"),
+        ("Peso:", f"{ficha['Peso']} gr"),
+        ("Dureza:", ficha["Dureza"]),
+        ("Cavidades:", ficha["Cavidades"])
+    ]
 
-    # ===== ESPECIFICACIONES DEL PRODUCTO =====
-    pdf.set_font("Arial", "B", 14)
-    pdf.ln(10)
-    pdf.cell(0, 10, "Especificaciones del Producto", ln=True)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 8,
-        f"Color: {ficha['Color']}\n"
-        f"Laminado: {ficha['Laminado']} mm\n"
-        f"Peso: {ficha['Peso']} gr\n"
-        f"Dureza: {ficha['Dureza']}\n"
-        f"Cavidades: {ficha['Cavidades']}"
-    )
+    for campo, valor in campos_producto:
+        pdf.set_font("Arial", "B", 11)  # Negrilla para el campo
+        pdf.cell(40, 8, campo, ln=False)
+        pdf.set_font("Arial", "", 11)   # Normal para el valor
+        pdf.cell(60, 8, str(valor), ln=True)
 
-    # ===== PROCESO =====
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Especificaciones del Proceso", ln=True)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 8,
-        f"Temperatura: {ficha['Temperatura']}\n"
-        f"Presión: {ficha['Presión']}\n"
-        f"Vulcanizado: {ficha['Vulcanizado']} min\n"
-        f"Tacado: {ficha['Tacado']} min\n"
-        f"Tiempo Total: {ficha['TiempoTotal']} min\n"
-        f"Promedio por Hora: {ficha['PromedioHora']:.2f} uds"
-    )
+    # Imagen al lado derecho
+    if "Imagen" in ficha and ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
+        x_pos = pdf.get_x() + 120
+        y_pos = pdf.get_y() - 40
+        pdf.image(f"datos/{ficha['Imagen']}", x_pos, y_pos, 50)
 
-    # ===== CORTE =====
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Datos de Corte", ln=True)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 8,
-        f"Tiempo por unidad: {ficha['TiempoCorteUnidad']} min\n"
-        f"Corte por Hora: {ficha['CorteHora']:.2f} uds\n"
-        f"Corte Diario Estimado: {ficha['CorteDiario']:.2f} uds"
-    )
+    pdf.ln(5)
 
-    # ===== OBSERVACIONES =====
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Observaciones", ln=True)
-    pdf.set_font("Arial", size=12)
-    observaciones = ficha["Observaciones"] if str(ficha["Observaciones"]).lower() != "nan" else "Sin observaciones"
-    pdf.multi_cell(0, 8, observaciones)
+    # === Especificaciones del Proceso (2 columnas) ===
+    add_section("Especificaciones del Proceso")
+    datos_proceso = [
+        ("Temperatura:", f"{ficha['Temperatura']}"),
+        ("Presión:", f"{ficha['Presión']}"),
+        ("Vulcanizado:", f"{ficha['Vulcanizado']} min"),
+        ("Tacado:", f"{ficha['Tacado']} min"),
+        ("Tiempo Total:", f"{ficha['TiempoTotal']} min"),
+        ("Promedio Hora:", f"{ficha['PromedioHora']} uds")
+    ]
 
+    col_width = pdf.w / 2 - 20
+    row_height = 8
+
+    for i in range(0, len(datos_proceso), 2):
+        # Primera columna
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(40, row_height, datos_proceso[i][0], border=0)
+        pdf.set_font("Arial", "", 11)
+        pdf.cell(col_width - 40, row_height, datos_proceso[i][1], border=0)
+
+        # Segunda columna (si existe)
+        if i + 1 < len(datos_proceso):
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(40, row_height, datos_proceso[i+1][0], border=0)
+            pdf.set_font("Arial", "", 11)
+            pdf.cell(col_width - 40, row_height, datos_proceso[i+1][1], border=0)
+
+        pdf.ln(row_height)
+
+    pdf.ln(5)
+
+    # === Datos de Corte ===
+    add_section("Datos de Corte")
+    datos_corte = [
+        ("Tiempo por unidad:", f"{ficha['TiempoCorteUnidad']} min"),
+        ("Corte por Hora:", f"{ficha['CorteHora']} uds"),
+        ("Corte diario estimado:", f"{ficha['CorteDiario']} uds")
+    ]
+
+    for campo, valor in datos_corte:
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(60, 8, campo, ln=False)
+        pdf.set_font("Arial", "", 11)
+        pdf.cell(60, 8, str(valor), ln=True)
+
+    pdf.ln(5)
+
+    # === Observaciones ===
+    add_section("Observaciones")
+    obs = str(ficha["Observaciones"]).strip()
+    pdf.set_font("Arial", "", 11)
+    pdf.multi_cell(0, 8, obs if obs.lower() != "nan" and obs else "Sin observaciones")
+
+# === Historial de Versiones ===
+    pdf.ln(5)
+    pdf.set_fill_color(0, 102, 204)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Historial de Versiones", ln=True, fill=True)
+
+    # Definir columnas
+    columnas = ["Versión", "Fecha", "Dureza", "Cav.", "Temp.", "Presión", "Tiempo", "Prom. Hora", "Corte/Hora"]
+    ancho_cols = [16, 24, 27, 15, 20, 20, 20, 24, 24]
+
+    # Función para dibujar encabezado
+    def dibujar_encabezado():
+        pdf.set_font("Arial", "B", 8)
+        pdf.set_text_color(0, 0, 0)
+        for i, col in enumerate(columnas):
+            pdf.cell(ancho_cols[i], 8, col, border=1, align="C")
+        pdf.ln()
+
+    # Encabezado inicial
+    dibujar_encabezado()
+
+    # Filas con colores alternos
+    pdf.set_font("Arial", "", 10)
+    fill = False  # Alternar color
+    for _, row in fichas_ref.iterrows():
+        # Salto de página si no hay espacio
+        if pdf.get_y() > 260:  # Ajusta si tu margen inferior cambia
+            pdf.add_page()
+            pdf.ln(5)
+            pdf.set_fill_color(0, 102, 204)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font("Arial", "B", 12)
+            pdf.cell(0, 10, "Historial de Versiones (cont.)", ln=True, fill=True)
+            dibujar_encabezado()
+
+        pdf.set_fill_color(240, 240, 240) if fill else pdf.set_fill_color(255, 255, 255)
+        fill = not fill
+
+        # Datos formateados
+        datos = [
+            row["Versión"],
+            str(row["Fecha"]),
+            row["Dureza"],
+            str(row["Cavidades"]),
+            f"{row['Temperatura']:.0f}",
+            f"{row['Presión']:.0f}",
+            f"{row['TiempoTotal']:.1f} min",
+            f"{row['PromedioHora']:.0f} uds",
+            f"{row['CorteHora']:.0f} uds"
+        ]
+
+        for i, dato in enumerate(datos):
+            pdf.cell(ancho_cols[i], 8, dato, border=1, align="C", fill=True)
+        pdf.ln()
+
+    # Guardar archivo
     pdf.output(output_path)
     return output_path
+
+    
+
 
 # Inicializar sesión
 if "logueado" not in st.session_state:
@@ -620,7 +718,7 @@ else:
         col3.markdown(f"**🧪 Fórmula:** {ficha['Fórmula']}")
 
         st.markdown("---")
-        st.markdown("### 📦 Especificaciones del Producto")
+        st.markdown("### Especificaciones del Producto")
         col1, col2 = st.columns([1, 2])
         with col1:
             if ficha["Imagen"] and os.path.exists(f"datos/{ficha['Imagen']}"):
@@ -685,52 +783,71 @@ else:
         selected = grid_response["selected_rows"]
 
         # Botones de acciones
+        
         if selected is not None and len(selected) > 0:
-            selected_ficha = selected[0]
-            col1, col2, col3 = st.columns(3)
+            if isinstance(selected, pd.DataFrame):
+                selected_row = selected.iloc[0]
+            elif isinstance(selected, list) and len(selected) > 0:
+                selected_row = pd.Series(selected[0])
+            else:
+                selected_row = None
 
-            # === BOTÓN PARA DESCARGAR PDF ===
-            with col1:
-                if st.button("📄 Descargar PDF"):
-                    logo_path = "datos/logo_empresa.png" if os.path.exists("datos/logo_empresa.png") else None
-                    imagen_producto = f"datos/{selected_ficha['Imagen']}" if os.path.exists(f"datos/{selected_ficha['Imagen']}") else None
+            if selected_row is not None:
+                # Recuperar ficha completa desde fichas_ref
+                selected_ref = selected_row["Referencia"]
+                selected_version = selected_row["Versión"]
+                selected_ficha = fichas_ref[
+                    (fichas_ref["Referencia"].str.lower() == str(selected_ref).lower()) &
+                    (fichas_ref["Versión"] == selected_version)
+                ].iloc[0].to_dict()
 
-                    pdf_path = generar_pdf_ficha(selected_ficha, logo_path, imagen_producto)
+                col1, col2, col3 = st.columns(3)
 
-                    with open(pdf_path, "rb") as pdf_file:
-                        st.download_button(
-                            label="⬇️ Descargar Ficha Técnica",
-                            data=pdf_file,
-                            file_name=f"Ficha_{selected_ficha['Referencia']}_{selected_ficha['Versión']}.pdf",
-                            mime="application/pdf"
+                # Botón PDF
+                with col1:
+                    if st.button("Generar PDF", key="pdf_btn"):
+                        pdf_path = generar_pdf_ficha(
+                            selected_ficha,
+                            fichas_ref,  # Todas las versiones de esta referencia
+                            output_path="datos/ficha_tecnica.pdf",
+                            logo_path="logo.png"
                         )
+                        with open(pdf_path, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Descargar PDF",
+                                data=f,
+                                file_name=f"Ficha_{selected_ficha['Referencia']}_{selected_ficha['Versión']}.pdf",
+                                mime="application/pdf"
+                            )
 
-            if st.session_state["rol"] == "Administrador":
-                with col2:
-                    if st.button("🗑️ Eliminar ficha seleccionada"):
-                        img_path = f"datos/{selected_ficha['Imagen']}"
-                        fichas = fichas.drop(fichas[fichas.index == int(selected_ficha['_selectedRowNodeInfo']['nodeRowIndex'])].index)
-                        fichas.to_csv(fichas_path, index=False)
-                        if os.path.exists(img_path):
-                            os.remove(img_path)
-                        st.success(f"Ficha {selected_ficha['Referencia']} {selected_ficha['Versión']} eliminada.")
-                        st.rerun()
-                with col3:
-                    if st.button("🔁 Generar nueva versión"):
-                        st.session_state["modo_version"] = True
-                        st.rerun()
+                # Botón eliminar (solo admin)
+                if st.session_state["rol"] == "Administrador":
+                    with col2:
+                        if st.button("🗑️ Eliminar seleccion", key="delete_btn"):
+                            img_path = f"datos/{selected_ficha['Imagen']}"
+                            row_index = fichas[
+                                (fichas["Referencia"] == selected_ficha["Referencia"]) &
+                                (fichas["Versión"] == selected_ficha["Versión"])
+                            ].index
 
+                            if not row_index.empty:
+                                fichas.drop(row_index, inplace=True)
+                                fichas.to_csv(fichas_path, index=False)
+                                if os.path.exists(img_path):
+                                    os.remove(img_path)
+                                st.success(f"Ficha {selected_ficha['Referencia']} {selected_ficha['Versión']} eliminada.")
+                                st.rerun()
+
+                    # Botón nueva versión
+                    with col3:
+                        if st.button("🔁 Generar nueva versión", key="new_ver_btn"):
+                            st.session_state["modo_version"] = True
+                            st.rerun()
 
 
  # ========= Generar Nueva Versión (solo administrador) =========
         if "modo_version" not in st.session_state:
             st.session_state["modo_version"] = False
-
-        if st.session_state["rol"] == "Administrador":
-            if not st.session_state["modo_version"]:
-                if st.button("🔁 Generar nueva versión"):
-                    st.session_state["modo_version"] = True
-                    st.rerun()
 
         if st.session_state["modo_version"]:
             with st.form("nueva_version"):
