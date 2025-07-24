@@ -7,7 +7,6 @@ Sello embolo ,V1,2025-06-26,Industrias Humcar,FTF-10,Negro,7.0,imagen_Sello embo
 Referencia de prueba 2,V1,2025-06-26,Cliente de prueba 1,FTF-11,Negro,6.0,imagen_Referencia de prueba 2_V1.png,50-55 Shore A,100.0,1200.0,1.0,10.0,1.0,2.0,3.0,200.0,1.0,60.0,480.0,8.0,;;;,
 Perfil Silicona Cuadrado,V1,2025-06-26,Industria de Estufas Continental S.A,FTF-08,Negro,6.0,imagen_Perfil Silicona Cuadrado_V1.png,50-55 Shore A,125.0,1200.0,5.0,10.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,8.0,Sin observaciones;;;,
 Perfil Silicona Empotre,V1,2025-06-26,Industria de Estufas Continental S.A,FTF-08,Negro,2.0,imagen_Perfil Silicona Empotre_V1.png,50-55 Shore A,120.0,1000.0,1.0,1.0,2.0,1.0,3.0,20.0,2.0,30.0,240.0,8.0,Sin observaciones;;;,
-Tope NItrilo Gabinete,V1,2025-06-26,Industria de Estufas Continental S.A,FTF-08,Negro,0.01,,50 Shore A,100.0,1000.0,1.0,1.0,0.5,1.0,1.5,40.0,0.5,120.0,960.0,8.0,x;;;,
 Tope Nitrilo Vidrio,V1,2025-06-26,Industria de Estufas Continental S.A,FTF-008,Negro,0.01,imagen_Tope Nitrilo Vidrio_V1.png,45-50 Shore A,150.0,1000.0,0.01,1.0,0.01,0.01,0.02,3000.0,0.01,6000.0,48000.0,8.0,Ninguna;;;,
 Diafragma R4 UPSO,V2,2025-06-30,Industrias Humcar,FTF-16,Negro,6.0,imagen_Diafragma R4 UPSO_V1.png,50-55 Shore A,140.0,1000.0,12.0,8.0,1.5,2.0,3.5,137.14285714285714,1.5,40.0,320.0,8.0,Sin observaciones;;;,
 Referencia de prueba 1,V2,2025-06-30,Cliente de prueba 1,FTF-100,Negro,8.0,imagen_Referencia de prueba 1_V1.png,60 - 65 Shore A,100.0,800.0,50.0,4.0,1.0,2.0,3.0,80.0,2.0,30.0,240.0,8.0,Estas son observaciones de prueba del cliente de prueba para la referencia de prueba;;;,
@@ -18,5 +17,5 @@ Empaque siliconado agujero 8 mm,V2,2025-06-30,Industria de Estufas Continental S
 Perfil Silicona Cuadrado,V2,2025-06-30,Industria de Estufas Continental S.A,FTF-08,Negro,6.0,imagen_Perfil Silicona Cuadrado_V1.png,50-55 Shore A,125.0,1200.0,4.0,14.0,1.0,1.0,2.0,420.0,1.0,60.0,480.0,8.0,Sin observaciones;;;,
 Perfil Silicona Empotre,V2,2025-06-30,Industria de Estufas Continental S.A,FTF-08,Negro,2.0,imagen_Perfil Silicona Empotre_V1.png,50-55 Shore A,120.0,1000.0,1.0,1.0,1.5,1.0,2.5,24.0,2.0,30.0,240.0,8.0,Sin observaciones;;;,
 Tope Nitrilo Vidrio,V2,2025-06-30,Industria de Estufas Continental S.A,FTF-008,Negro,5.0,imagen_Tope Nitrilo Vidrio_V1.png,45-50 Shore A,150.0,1000.0,10.0,1.0,1.0,1.0,2.0,30.0,1.0,60.0,480.0,8.0,Ninguna;;;,
-Valvula INT con E.E,V1,2025-07-16,Industria de Estufas Continental S.A,FTF-18,Negro,6.0,imagen_Valvula INT con E.E_V1.png,60-65 Shore A,150.0,1000.0,0.5,15.0,1.0,1.5,2.5,360.0,0.5,120.0,960.0,8.0,,
-Tope Nitrilo Gabinete,V1,2025-07-16,Industria de Estufas Continental S.A,FTF-08,Negro,5.0,imagen_Tope Nitrilo Gabinete_V1.png,55-60 Shore A,120.0,1200.0,0.5,4.0,1.0,0.5,1.5,160.0,0.5,120.0,960.0,8.0,,
+Valvula INT con E.E,V1,2025-07-16,Industria de Estufas Continental S.A,FTF-18,Negro,6.0,imagen_Valvula INT con E.E_V1.png,60-65 Shore A,150.0,1000.0,0.5,15.0,1.0,1.5,2.5,360.0,0.5,120.0,960.0,8.0,,;;;
+Tope Nitrilo Gabinete,V1,2025-07-16,Industria de Estufas Continental S.A,FTF-08,Negro,5.0,imagen_Tope Nitrilo Gabinete_V1.png,55-60 Shore A,120.0,1200.0,0.5,4.0,1.0,0.5,1.5,160.0,0.5,120.0,960.0,8.0,,;;;

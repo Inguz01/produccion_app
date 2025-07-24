@@ -2,17 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-import time
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from datetime import time as dtime
-from datetime import datetime
+from datetime import date, time, datetime as dtime
+from datetime import time as dt_time
 import streamlit.components.v1 as components
-from datetime import date
 import base64
 from io import BytesIO
 from fpdf import FPDF
-
-#st.set_page_config(page_title="Rubber Soft", layout="wide")
 
 
 # Crear carpeta de datos si no existe
@@ -936,6 +932,7 @@ else:
 # =======================
 # VISUALIZAR ÓRDENES DE PRODUCCIÓN
 # =======================
+
     elif menu == "Órdenes de Producción":
         st.header("🏭 Órdenes de Producción")
         st.subheader("🧾 Órdenes Generales")
@@ -943,9 +940,10 @@ else:
         op_path = "datos/ordenes_produccion.csv"
         detalle_op_path = "datos/detalle_ordenes_produccion.csv"
         produccion_real_path = "datos/produccion_real.csv"
-        oc_path = "datos/ordenes_compra.csv"  # para traer el número de OC del cliente
+        oc_path = "datos/ordenes_compra.csv"
+        programacion_path = "datos/programacion_produccion.csv"
 
-        if not all(os.path.exists(p) for p in [op_path, detalle_op_path, produccion_real_path, oc_path]):
+        if not all(os.path.exists(p) for p in [op_path, detalle_op_path, produccion_real_path, oc_path, programacion_path]):
             st.warning("No hay datos suficientes para mostrar órdenes de producción.")
             st.stop()
 
@@ -953,11 +951,15 @@ else:
         detalle_op_df = pd.read_csv(detalle_op_path)
         produccion_real_df = pd.read_csv(produccion_real_path)
         ordenes_oc = pd.read_csv(oc_path)
+        programacion_df = pd.read_csv(programacion_path)
 
-        # Agregar el número de OC del cliente al detalle de OP
+        if "ID_OP" not in programacion_df.columns:
+            st.error("❌ El archivo de programación no contiene 'ID_OP'. Verifica que las OP estén correctamente relacionadas al programar.")
+            st.stop()
+
         detalle_op_df["OC_Origen"] = detalle_op_df["OC_Origen"].astype(str)
         ordenes_oc["Numero_OC_Cliente"] = ordenes_oc["Numero_OC_Cliente"].astype(str)
-        
+
         detalle_op_df = detalle_op_df.merge(
             ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
             left_on="OC_Origen",
@@ -965,17 +967,20 @@ else:
             how="left"
         )
 
-        # Agrupar producción real
         produccion_agrupada = produccion_real_df.groupby(["ID_OP", "Referencia"])["Cantidad_Producida"].sum().reset_index()
 
-        # Unir con detalle OP
         detalle_completo = detalle_op_df.merge(
             produccion_agrupada,
             on=["ID_OP", "Referencia"],
             how="left"
         ).fillna({"Cantidad_Producida": 0})
 
-        # Calcular avance global por OP
+        detalle_completo = detalle_completo.merge(
+            programacion_df,
+            on=["ID_OP", "Referencia"],
+            how="left"
+        )
+
         avance_por_op = detalle_completo.groupby("ID_OP").apply(
             lambda x: (x["Cantidad_Producida"].sum() / x["Cantidad_Producir"].sum()) * 100 if x["Cantidad_Producir"].sum() > 0 else 0
         ).reset_index(name="Avance (%)")
@@ -988,17 +993,6 @@ else:
 
                 detalle_filtrado = detalle_completo[detalle_completo["ID_OP"] == row["ID_OP"]]
 
-                # Agrupar referencias duplicadas en una sola línea
-                detalle_filtrado = detalle_filtrado.groupby(
-                    ["Referencia", "OC_Origen", "Fecha_Entrega"]
-                ).agg({
-                    "Cantidad_Producir": "sum",
-                    "Cantidad_Producida": "sum"
-                }).reset_index()
-
-                # Eliminar duplicados por seguridad
-                detalle_filtrado = detalle_filtrado.drop_duplicates(subset=["Referencia", "OC_Origen", "Fecha_Entrega", "Cantidad_Producir"])
-
                 for _, det in detalle_filtrado.iterrows():
                     avance_ref = (det["Cantidad_Producida"] / det["Cantidad_Producir"]) * 100 if det["Cantidad_Producir"] > 0 else 0
                     st.markdown(
@@ -1009,6 +1003,13 @@ else:
                         f"Avance: **{avance_ref:.2f}%** | "
                         f"Fecha Entrega: {det['Fecha_Entrega']}"
                     )
+
+                    if pd.notna(det.get("Máquina")) or pd.notna(det.get("Operario")):
+                        st.markdown(
+                            f"🛠️ Máquina: {det.get('Máquina', 'N/A')} | 👷‍♂️ Operario: {det.get('Operario', 'N/A')} | ⏰ Horario: {det.get('Hora_Inicio', '')} - {det.get('Hora_Fin', '')}"
+                        )
+
+
 
 # =======================
 # REGISTRAR ORDEN DE COMPRA
@@ -1149,91 +1150,108 @@ else:
             elif not st.session_state["productos_temp"]:
                 st.info("Agrega al menos un producto para registrar la orden.")
 
-# =======================
-# SEGUIMIENTO DE ORDEN DE COMPRA
-# =======================
+# ==============================================
+# SEGUIMIENTO DE ÓRDENES (con lógica de producción real)
+# ==============================================
+    if menu == "Seguimiento de Órdenes":
+        # Forzar vista más ancha solo para esta sección
+        st.markdown("""
+            <style>
+            .block-container {
+                max-width: 95% !important;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+            </style>
+        """, unsafe_allow_html=True)
 
-    elif menu == "Seguimiento de Órdenes":
         st.header("📋 Seguimiento de Órdenes de Compra")
-
-        ordenes_path = "datos/ordenes_compra.csv"
+        oc_path = "datos/ordenes_compra.csv"
         detalles_path = "datos/detalle_ordenes_compra.csv"
+        prod_real_path = "datos/produccion_real.csv"
 
-        if not os.path.exists(ordenes_path) or not os.path.exists(detalles_path):
+        if not all(os.path.exists(p) for p in [oc_path, detalles_path]):
             st.warning("No hay órdenes registradas.")
+            st.stop()
+
+        ordenes_df = pd.read_csv(oc_path)
+        detalles_df = pd.read_csv(detalles_path)
+
+        # Usamos ID_Orden para vincular y Numero_OC_Cliente para mostrar
+        oc_col = "Numero_OC_Cliente" if "Numero_OC_Cliente" in ordenes_df.columns else "ID_Orden"
+        detalles_oc_col = "ID_Orden"
+
+        if os.path.exists(prod_real_path):
+            prod_df = pd.read_csv(prod_real_path)
+            if "Conformes" not in prod_df.columns:
+                prod_df["Conformes"] = 0
         else:
-            ordenes_df = pd.read_csv(ordenes_path, dtype={"Numero_OC_Cliente": str})
-            detalles_df = pd.read_csv(detalles_path)
+            prod_df = pd.DataFrame(columns=["ID_OP", "Referencia", "Conformes"])
 
-            # Inicializar columna Producido si no existe
-            if "Producido" not in detalles_df.columns:
-                detalles_df["Producido"] = 0
-                detalles_df.to_csv(detalles_path, index=False)
+        # Calcular estado con base en conformes reales
+        for idx, orden in ordenes_df.iterrows():
+            productos = detalles_df[detalles_df[detalles_oc_col] == orden["ID_Orden"]]
+            total_cantidad = productos["Cantidad"].sum()
+            avance_total = 0
+            for _, row in productos.iterrows():
+                produccion_ref = prod_df[prod_df["Referencia"] == row["Referencia"]] if not prod_df.empty else pd.DataFrame(columns=["Conformes"])
+                total_conf = produccion_ref["Conformes"].sum() if not produccion_ref.empty else 0
+                avance_total += min(total_conf, row["Cantidad"])
 
-            # Recalcular estado de cada orden en función del progreso
-            for idx, orden in ordenes_df.iterrows():
-                productos = detalles_df[detalles_df["ID_Orden"] == orden["ID_Orden"]]
-
-                total_cantidad = productos["Cantidad"].sum()
-                total_producido = productos["Producido"].sum()
-
-                if total_producido == 0:
-                    estado_actual = "Pendiente"
-                elif total_producido < total_cantidad:
-                    estado_actual = "En Producción"
-                else:
-                    estado_actual = "Terminada"
-
-                ordenes_df.at[idx, "Estado"] = estado_actual
-
-            # Guardar cambios en archivo CSV
-            ordenes_df.to_csv(ordenes_path, index=False)
-            st.subheader("🔎 Filtro por estado")
-            estados = ordenes_df["Estado"].unique().tolist()
-            estado_filtro = st.selectbox("Selecciona un estado", ["Todos"] + estados)
-
-            if estado_filtro != "Todos":
-                ordenes_df = ordenes_df[ordenes_df["Estado"] == estado_filtro]
-
-            if ordenes_df.empty:
-                st.info("No hay órdenes con el estado seleccionado.")
+            if avance_total == 0:
+                estado_actual = "Pendiente"
+            elif avance_total < total_cantidad:
+                estado_actual = "En Producción"
             else:
-                st.markdown("### 🧾 Órdenes encontradas")
-                for idx, orden in ordenes_df.iterrows():
-                    productos = detalles_df[detalles_df["ID_Orden"] == orden["ID_Orden"]]
+                estado_actual = "Terminada"
 
-                    total_cantidad = productos["Cantidad"].sum()
-                    total_producido = productos["Producido"].sum()
-                    avance = total_producido / total_cantidad if total_cantidad > 0 else 0
+            ordenes_df.at[idx, "Estado"] = estado_actual
 
-                    with st.expander(f"🧾 {orden['Numero_OC_Cliente']} - {orden['Cliente']} ({avance*100:.1f}%)"):
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.markdown(f"**📅 Fecha recepción:** {orden['Fecha_Recepcion']}")
-                        col2.markdown(f"**📌 Estado:** {orden['Estado']}")
-                        col3.markdown(f"**🏢 Cliente:** {orden['Cliente']}")
-                        col4.progress(avance)
+        ordenes_df.to_csv(oc_path, index=False)
 
-                        st.markdown("#### 📦 Avance por referencia")
-                        for i, row in productos.iterrows():
-                            colr1, colr2, colr3 = st.columns([3, 2, 5])
+        # Mostrar tabla de órdenes con Numero_OC_Cliente visible
+        mostrar_df = ordenes_df.copy()
+        st.subheader("Órdenes de Compra")
+        st.dataframe(mostrar_df[[oc_col, "Cliente", "Fecha_Recepcion", "Estado"]], use_container_width=True)
 
-                            referencia = row['Referencia']
-                            producido = row['Producido'] if pd.notna(row['Producido']) else 0
-                            cantidad = row['Cantidad'] if pd.notna(row['Cantidad']) else 0
+        # Filtro por cliente
+        clientes = ordenes_df["Cliente"].unique().tolist()
+        cliente_sel = st.selectbox("Filtrar por cliente", ["Todos"] + clientes)
+        if cliente_sel != "Todos":
+            ordenes_df = ordenes_df[ordenes_df["Cliente"] == cliente_sel]
+            detalles_df = detalles_df[detalles_df[detalles_oc_col].isin(ordenes_df["ID_Orden"])]
 
-                            # Calcular progreso con protección total
-                            progreso = (producido / cantidad * 100) if cantidad > 0 else 0
-                            progreso_valido = progreso / 100  # Streamlit espera 0.0 - 1.0
+        # Selección de orden para ver detalle mostrando Numero_OC_Cliente
+        oc_sel = st.selectbox("Selecciona una Orden de Compra", ordenes_df[oc_col].tolist())
+        if oc_sel:
+            st.write(f"Detalle de la Orden {oc_sel}")
+            id_orden_sel = ordenes_df[ordenes_df[oc_col] == oc_sel]["ID_Orden"].values[0]
+            detalle_sel = detalles_df[detalles_df[detalles_oc_col] == id_orden_sel]
 
-                            colr1.markdown(f"🔹 **{referencia}**")
-                            colr2.markdown(f"{int(producido)}/{int(cantidad)} unidades")
-                            colr3.progress(progreso_valido, text=f"{progreso:.1f}% completado")
-                            
+            if not prod_df.empty and "Referencia" in prod_df.columns and "Conformes" in prod_df.columns:
+                avance_df = prod_df.groupby("Referencia", as_index=False)["Conformes"].sum()
+                detalle_sel = detalle_sel.merge(avance_df, on="Referencia", how="left")
+            else:
+                detalle_sel["Conformes"] = 0
+
+            detalle_sel = detalle_sel.fillna({"Conformes": 0})
+            detalle_sel["Avance_%"] = round((detalle_sel["Conformes"] / detalle_sel["Cantidad"] * 100), 2)
+            st.dataframe(detalle_sel.drop(columns=["ID_Orden"]), use_container_width=True)
+
+            # Descargar resumen en CSV
+            csv_data = detalle_sel.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="⬇️ Descargar Detalle (CSV)",
+                data=csv_data,
+                file_name=f"detalle_OC_{oc_sel}.csv",
+                mime="text/csv"
+            )
 # ========================
 # REGISTRAR ORDEN DE PRODUCCIÓN
 # ========================
     elif menu == "Registrar Orden de Producción" and st.session_state["rol"] == "Administrador":
-        st.header("🏭 Registrar Orden de Producción")
+        from datetime import date
+        st.header("🏠 Registrar Orden de Producción")
 
         op_path = "datos/ordenes_produccion.csv"
         detalle_op_path = "datos/detalle_ordenes_produccion.csv"
@@ -1247,7 +1265,6 @@ else:
         ordenes_oc = pd.read_csv(oc_path)
         detalle_oc = pd.read_csv(detalle_oc_path)
 
-        # Validación permanente de columna Producido
         if "Producido" not in detalle_oc.columns:
             detalle_oc["Producido"] = 0
         else:
@@ -1257,25 +1274,21 @@ else:
         cliente_sel = st.selectbox("Selecciona el cliente", clientes_disponibles)
 
         ocs_cliente = ordenes_oc[ordenes_oc["Cliente"] == cliente_sel]
-        detalle_cliente = detalle_oc.merge(
-            ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
-            on="ID_Orden", how="inner"
-        )
-        detalle_cliente = detalle_cliente[detalle_cliente["ID_Orden"].isin(ocs_cliente["ID_Orden"])]
+        detalle_cliente = detalle_oc[detalle_oc["ID_Orden"].isin(ocs_cliente["ID_Orden"])]
 
-        
-        # Calcular pendiente considerando lo ya programado en OP
+        detalle_cliente = detalle_cliente.merge(
+            ordenes_oc[["ID_Orden", "Numero_OC_Cliente"]],
+            on="ID_Orden", how="left"
+        )
+
         if os.path.exists(detalle_op_path):
             detalle_op_df = pd.read_csv(detalle_op_path)
-            programado_por_ref = (
+            programado = (
                 detalle_op_df.groupby(["Referencia", "OC_Origen", "Fecha_Entrega"])["Cantidad_Producir"]
-                .sum()
-                .reset_index()
-                .rename(columns={"Cantidad_Producir": "Programado"})
+                .sum().reset_index().rename(columns={"Cantidad_Producir": "Programado"})
             )
-
             detalle_cliente = detalle_cliente.merge(
-                programado_por_ref,
+                programado,
                 left_on=["Referencia", "Numero_OC_Cliente", "Fecha_Entrega"],
                 right_on=["Referencia", "OC_Origen", "Fecha_Entrega"],
                 how="left"
@@ -1285,78 +1298,51 @@ else:
             detalle_cliente["Programado"] = 0
 
         detalle_cliente["Pendiente"] = detalle_cliente["Cantidad"] - detalle_cliente["Producido"] - detalle_cliente["Programado"]
-        
-        # ✅ Mantener solo pendientes mayores a 0
         detalle_cliente = detalle_cliente[detalle_cliente["Pendiente"] > 0]
 
-
-        # Excluir combinaciones ya incluidas en OP (si aplica)
-        if os.path.exists(detalle_op_path):
-            detalle_op_df = pd.read_csv(detalle_op_path)
-            detalle_cliente["clave"] = (
-                detalle_cliente["Referencia"].astype(str) + "|" +
-                detalle_cliente["ID_Orden"].astype(str) + "|" +
-                detalle_cliente["Fecha_Entrega"].astype(str)
-            )
-            detalle_op_df["clave"] = (
-                detalle_op_df["Referencia"].astype(str) + "|" +
-                detalle_op_df["OC_Origen"].astype(str) + "|" +
-                detalle_op_df["Fecha_Entrega"].astype(str)
-            )
-            detalle_cliente = detalle_cliente[~detalle_cliente["clave"].isin(detalle_op_df["clave"])]
-            detalle_cliente.drop(columns="clave", inplace=True)
-
-        detalle_cliente = detalle_cliente[detalle_cliente["Pendiente"] > 0]
-
-        resumen = detalle_cliente.groupby(["Referencia", "ID_Orden", "Numero_OC_Cliente", "Fecha_Entrega"]).agg({
-            "Pendiente": "sum"
-        }).reset_index()
+        resumen = detalle_cliente.groupby(["Referencia", "ID_Orden", "Numero_OC_Cliente", "Fecha_Entrega"])["Pendiente"].sum().reset_index()
 
         if resumen.empty:
-            st.subheader("📦 Referencias pendientes por generar una OP")
             st.success("✅ No hay referencias pendientes para generar OP.")
             st.stop()
         else:
             st.subheader("📦 Referencias pendientes por generar una OP")
-            st.dataframe(resumen.rename(columns={"ID_Orden": "OC"}))
+            st.dataframe(resumen.rename(columns={"Numero_OC_Cliente": "OC"}))
 
         st.subheader("➕ Selección de referencias para producir")
-        st.markdown("Selecciona las referencias que deseas producir. Por defecto se prellena el total pendiente.")
 
         seleccionadas = []
-
         for _, fila in resumen.iterrows():
             ref = fila["Referencia"]
             oc = fila["Numero_OC_Cliente"]
             fecha = fila["Fecha_Entrega"]
             pendiente = int(fila["Pendiente"])
-
             clave = f"{ref}_{oc}_{fecha}"
+
             col1, col2 = st.columns([4, 2])
-
-            # Checkbox para seleccionar
             with col1:
-                seleccionado = st.checkbox(
-                    f"🔹 {ref} (OC: {oc}, entrega: {fecha}, pendiente: {pendiente})",
-                    key=f"check_{clave}"
-                )
-
-            # Campo para la cantidad
+                seleccionado = st.checkbox(f"🔹 {ref} (OC: {oc}, entrega: {fecha})", key=f"check_{clave}")
             with col2:
-                cantidad = st.number_input(
-                    "Cantidad a producir",
-                    min_value=0,
-                    max_value=pendiente,
-                    value=pendiente if seleccionado else 0,
-                    step=1,
-                    key=f"input_{clave}",
-                    disabled=not seleccionado
-                )
-
-            # Validación en tiempo real
-            if seleccionado and cantidad > pendiente:
-                st.warning(f"No puedes producir más de {pendiente} unidades para {ref}.")
-                cantidad = pendiente
+                if seleccionado:
+                    cantidad = st.number_input(
+                        "Cantidad a producir",
+                        min_value=0,
+                        max_value=pendiente,
+                        value=pendiente,
+                        step=1,
+                        key=f"input_{clave}"
+                    )
+                else:
+                    st.number_input(
+                        "Cantidad a producir",
+                        min_value=0,
+                        max_value=pendiente,
+                        value=0,
+                        step=1,
+                        key=f"input_{clave}",
+                        disabled=True
+                    )
+                    cantidad = 0
 
             if seleccionado and cantidad > 0:
                 seleccionadas.append({
@@ -1366,12 +1352,10 @@ else:
                     "Fecha_Entrega": fecha
                 })
 
-        # Botón para registrar OP
         if st.button("✅ Registrar Orden de Producción"):
             if not seleccionadas:
                 st.warning("⚠️ Debes seleccionar al menos una referencia con cantidad mayor a cero.")
             else:
-                # === Lógica para registrar la OP ===
                 op_df = pd.read_csv(op_path) if os.path.exists(op_path) else pd.DataFrame(columns=["ID_OP", "Cliente", "Fecha_Creacion", "Estado"])
                 nuevo_id = f"OP-{len(op_df)+1:04d}"
 
@@ -1384,7 +1368,6 @@ else:
                 op_df = pd.concat([op_df, nueva_op], ignore_index=True)
                 op_df.to_csv(op_path, index=False)
 
-                # Detalle OP
                 detalle_op_df = pd.read_csv(detalle_op_path) if os.path.exists(detalle_op_path) else pd.DataFrame(columns=[
                     "ID_OP", "Referencia", "Cantidad_Producir", "OC_Origen", "Cantidad_OC", "Fecha_Entrega"
                 ])
@@ -1407,8 +1390,6 @@ else:
                         if restante <= 0:
                             break
                         cantidad_oc = min(fila["Pendiente"], restante)
-
-                        # Agregar a nuevas líneas
                         nuevas_lineas.append({
                             "ID_OP": nuevo_id,
                             "Referencia": ref,
@@ -1417,175 +1398,136 @@ else:
                             "Cantidad_OC": fila["Cantidad"],
                             "Fecha_Entrega": fecha_entrega
                         })
-
-                        # ✅ Actualizar el Producido en detalle_oc
                         detalle_oc.loc[idx, "Producido"] += cantidad_oc
                         restante -= cantidad_oc
 
-                # Guardar en detalle OP
                 detalle_op_df = pd.concat([detalle_op_df, pd.DataFrame(nuevas_lineas)], ignore_index=True)
                 detalle_op_df.to_csv(detalle_op_path, index=False)
-
-                # ✅ Guardar cambios en detalle_oc (para reflejar los pendientes)
                 detalle_oc.to_csv(detalle_oc_path, index=False)
 
                 st.success(f"✅ Orden de Producción **{nuevo_id}** registrada exitosamente.")
                 st.info("Redirigiendo en 3 segundos...")
-                time.sleep(3)
+                import time; time.sleep(3)
                 st.rerun()
 
-# --------------------
-# PROGRAMAR PRODUCCIÓN
-# --------------------
 
-    elif menu == "Programar Producción":
+# =======================
+# PROGRAMAR PRODUCCIÓN
+# =======================
+    elif menu == "Programar Producción" and st.session_state["rol"] == "Administrador":
+        import time as systime
+        from datetime import datetime, time, date
+
+        # Forzar vista más ancha solo para esta sección
         st.markdown("""
             <style>
-            [data-testid="stSidebar"] ~ div .block-container {
-                max-width: 100% !important;
+            .block-container {
+                max-width: 95% !important;
                 padding-left: 2rem;
                 padding-right: 2rem;
             }
+            .conflicto {
+                background-color: #ffcccc !important;
+                color: #990000 !important;
+                padding: 0.5rem;
+                border-radius: 0.25rem;
+                font-weight: bold;
+            }
             </style>
         """, unsafe_allow_html=True)
-    
-        st.header("Programación de Producción (Asignación por Día)")
 
-        maquinas_path = "datos/maquinas.csv"
-        usuarios_path = "datos/usuarios.csv"
+        st.header("🗓️ Programar Producción")
+
         op_path = "datos/ordenes_produccion.csv"
         detalle_op_path = "datos/detalle_ordenes_produccion.csv"
         programacion_path = "datos/programacion_produccion.csv"
+        maquinas_path = "datos/maquinas.csv"
+        usuarios_path = "datos/usuarios.csv"
 
-        for path in [maquinas_path, usuarios_path, op_path, detalle_op_path]:
-            if not os.path.exists(path):
-                st.error(f"❌ Falta el archivo: {path}")
-                st.stop()
+        if not all(os.path.exists(p) for p in [op_path, detalle_op_path, maquinas_path, usuarios_path]):
+            st.warning("Faltan archivos necesarios para programar la producción.")
+            st.stop()
 
-        maquinas_df = pd.read_csv(maquinas_path)
-        usuarios_df = pd.read_csv(usuarios_path)
-        operarios_df = usuarios_df[usuarios_df["rol"] == "Operario"]
         op_df = pd.read_csv(op_path)
         detalle_op_df = pd.read_csv(detalle_op_path)
+        maquinas_df = pd.read_csv(maquinas_path)
+        usuarios_df = pd.read_csv(usuarios_path)
 
-        referencias = detalle_op_df.merge(op_df, on="ID_OP", how="left")
-        referencias = referencias.groupby(["ID_OP", "Cliente", "Referencia", "OC_Origen", "Fecha_Entrega"], as_index=False).agg({"Cantidad_Producir": "sum"})
-        referencias_disponibles = referencias["Referencia"].dropna().unique().tolist()
+        operarios = usuarios_df[usuarios_df["rol"] == "Operario"]["nombre"].tolist()
+        maquinas = maquinas_df[maquinas_df["Estado"] == "Activa"]["Nombre"].tolist()
 
-        if "planificacion_tmp" not in st.session_state:
-            st.session_state.planificacion_tmp = []
-        if "planificacion_definitiva" not in st.session_state:
-            st.session_state.planificacion_definitiva = []
+        if os.path.exists(programacion_path):
+            programacion_df = pd.read_csv(programacion_path)
+        else:
+            programacion_df = pd.DataFrame(columns=["ID_OP", "Referencia", "Fecha", "Hora_Inicio", "Hora_Fin", "Máquina", "Operario", "Cantidad"])
 
-        fecha_dia = st.date_input("📅 Selecciona el día a programar")
+        st.subheader("📅 Selecciona fecha para programar")
+        fecha_programacion = st.date_input("Fecha de programación", value=date.today())
 
-        if fecha_dia:
-            fecha_str = fecha_dia.strftime("%Y-%m-%d")
-            st.subheader(f"🧾 Asignaciones para el {fecha_str}")
+        if not fecha_programacion:
+            st.info("Selecciona una fecha para programar.")
+            st.stop()
 
-            if st.button("➕ Nueva asignación"):
-                nueva = {
-                    "Fecha": fecha_str,
-                    "Máquina": "",
-                    "Referencia": "",
-                    "Operario": "",
-                    "Hora_Inicio": dtime(8, 0),
-                    "Hora_Fin": dtime(17, 0)
-                }
-                # Buscar el último índice donde aparece la misma fecha
-                indices_fecha = [i for i, f in enumerate(st.session_state.planificacion_tmp) if f["Fecha"] == fecha_str]
-                idx = max(indices_fecha) + 1 if indices_fecha else len(st.session_state.planificacion_tmp)
-                st.session_state.planificacion_tmp.insert(idx, nueva)
+        # Filtrar referencias ya totalmente programadas
+        programadas_total = programacion_df.groupby(["ID_OP", "Referencia"]).agg({"Cantidad": "sum"}).reset_index()
+        detalle_op_df = detalle_op_df.merge(programadas_total, on=["ID_OP", "Referencia"], how="left", suffixes=("", "_Programada"))
+        detalle_op_df["Cantidad_Programada"] = detalle_op_df["Cantidad"].fillna(0)
+        detalle_op_df = detalle_op_df[detalle_op_df["Cantidad_Producir"] > detalle_op_df["Cantidad_Programada"]]
 
+        detalle_pendiente = detalle_op_df.merge(op_df, on="ID_OP")
 
-            asignaciones_actuales = [fila for fila in st.session_state.planificacion_tmp if fila["Fecha"] == fecha_str]
-            eliminar_indices = []
+        st.subheader("📦 Referencias disponibles para programar")
 
-            for i, fila in enumerate(asignaciones_actuales):
-                col0, col1, col2, col3, col4, col5, col6 = st.columns([0.3, 2.5, 3, 2.5, 1.5, 1.5, 0.5], gap="small")
-                with col0:
-                    st.markdown(f"**{i+1}**")
-                fila["Máquina"] = col1.selectbox("Máquina", maquinas_df["Nombre"].tolist(), index=maquinas_df["Nombre"].tolist().index(fila["Máquina"]) if fila["Máquina"] in maquinas_df["Nombre"].tolist() else 0, key=f"maq_{i}")
-                fila["Referencia"] = col2.selectbox("Referencia", referencias_disponibles, index=referencias_disponibles.index(fila["Referencia"]) if fila["Referencia"] in referencias_disponibles else 0, key=f"ref_{i}")
-                fila["Operario"] = col3.selectbox("Operario", operarios_df["nombre"].tolist(), index=operarios_df["nombre"].tolist().index(fila["Operario"]) if fila["Operario"] in operarios_df["nombre"].tolist() else 0, key=f"ope_{i}")
-                fila["Hora_Inicio"] = col4.time_input("Inicio", value=fila["Hora_Inicio"], key=f"ini_{i}")
-                fila["Hora_Fin"] = col5.time_input("Fin", value=fila["Hora_Fin"], key=f"fin_{i}")
-                if col6.button("🗑️", key=f"del_tmp_{i}"):
-                    eliminar_indices.append(i)
+        programacion_valida = []
+        referencias_seleccionadas = []
+        grouped = detalle_pendiente.groupby("ID_OP")
 
-            for idx in sorted(eliminar_indices, reverse=True):
-                del st.session_state.planificacion_tmp[idx]
+        for op_id, group in grouped:
+            cliente = group["Cliente"].iloc[0]
+            st.markdown(f"### 🧾 {op_id} | Cliente: {cliente}")
 
-            if st.button("✅ Asignar este día"):
-                plan_dia = [f for f in st.session_state.planificacion_tmp if f["Fecha"] == fecha_str]
-                errores = []
-                for i, fila in enumerate(plan_dia):
-                    if not all([fila["Máquina"], fila["Referencia"], fila["Operario"], fila["Hora_Inicio"], fila["Hora_Fin"]]):
-                        errores.append(f"❌ Fila {i+1} incompleta.")
-                    if fila["Hora_Inicio"] >= fila["Hora_Fin"]:
-                        errores.append(f"🕒 Hora inválida en fila {i+1}.")
+            for idx, fila in group.iterrows():
+                key_base = f"{fila['ID_OP']}_{fila['Referencia']}_{fecha_programacion}_{idx}".replace(" ", "_").replace("/", "-")
+                cantidad_max = int(fila["Cantidad_Producir"] - fila["Cantidad_Programada"])
 
-                if errores:
-                    for e in errores:
-                        st.error(e)
-                else:
-                    st.session_state.planificacion_definitiva.extend(plan_dia)
-                    st.session_state.planificacion_tmp = [f for f in st.session_state.planificacion_tmp if f["Fecha"] != fecha_str]
-                    st.rerun()
+                cols = st.columns([1, 2, 1.2, 1.2, 1.5, 1.5, 1])
+                programar = cols[0].checkbox("✅", key=f"prog_{key_base}")
+                cols[1].markdown(f"**{fila['Referencia']}**")
 
-        st.markdown("### 📋 Planificación acumulada (sin guardar)")
+                if programar:
+                    cantidad = cols[2].number_input("Cantidad", min_value=1, max_value=cantidad_max, value=cantidad_max, step=1, key=f"cantidad_{key_base}")
+                    hora_inicio = cols[3].time_input("Inicio", value=time(8, 0), key=f"ini_{key_base}")
+                    hora_fin = cols[4].time_input("Fin", value=time(16, 0), key=f"fin_{key_base}")
+                    maquina = cols[5].selectbox("Máquina", maquinas, key=f"maq_{key_base}")
+                    operario = cols[6].selectbox("Operario", operarios, key=f"op_{key_base}")
 
-        df_acum = pd.DataFrame(st.session_state.planificacion_definitiva)
-        if not df_acum.empty:
-            df_acum = df_acum.sort_values(by=["Fecha", "Máquina", "Hora_Inicio"]).reset_index(drop=True)
-            for i, fila in df_acum.iterrows():
-                fila_id = f"{fila['Fecha']}|{fila['Máquina']}|{fila['Referencia']}|{fila['Operario']}|{fila['Hora_Inicio']}|{fila['Hora_Fin']}"
-                col1, col2 = st.columns([0.92, 0.08])
-                col1.markdown(
-                    f"📅 {fila['Fecha']} | 🛠️ {fila['Máquina']} | 📦 {fila['Referencia']} | 👷‍♂️ {fila['Operario']} | ⏰ {fila['Hora_Inicio']} - {fila['Hora_Fin']}"
-                )
-                if col2.button("🗑️", key=f"elim_def_{i}"):
-                    st.session_state.planificacion_definitiva = [
-                        f for f in st.session_state.planificacion_definitiva
-                        if f"{f['Fecha']}|{f['Máquina']}|{f['Referencia']}|{f['Operario']}|{f['Hora_Inicio']}|{f['Hora_Fin']}" != fila_id
-                    ]
-                    st.rerun()
+                    ref_actual = {
+                        "ID_OP": fila["ID_OP"],
+                        "Referencia": fila["Referencia"],
+                        "Fecha": fecha_programacion.strftime("%Y-%m-%d"),
+                        "Hora_Inicio": hora_inicio,
+                        "Hora_Fin": hora_fin,
+                        "Máquina": maquina,
+                        "Operario": operario,
+                        "Cantidad": cantidad
+                    }
 
+                    conflictos_maquina = [r for r in referencias_seleccionadas if r["Máquina"] == maquina and hora_inicio < r["Hora_Fin"] and hora_fin > r["Hora_Inicio"]]
+                    conflictos_operario = [r for r in referencias_seleccionadas if r["Operario"] == operario and hora_inicio < r["Hora_Fin"] and hora_fin > r["Hora_Inicio"]]
 
-            st.markdown("---")
-            st.subheader("📅 Guardar programación definitiva")
-            if st.button("📦 Guardar programación"):
-                errores = []
-                df_validado = pd.DataFrame(st.session_state.planificacion_definitiva)
-                for i, fila_i in df_validado.iterrows():
-                    for j, fila_j in df_validado.iterrows():
-                        if i >= j or fila_i["Fecha"] != fila_j["Fecha"]:
-                            continue
-                        si, sf = fila_i["Hora_Inicio"], fila_i["Hora_Fin"]
-                        sj, sjf = fila_j["Hora_Inicio"], fila_j["Hora_Fin"]
-                        overlap = not (sf <= sj or sjf <= si)
-                        if overlap:
-                            if fila_i["Operario"] == fila_j["Operario"]:
-                                errores.append(f"👷‍♂️ Solapamiento operario en filas {i+1} y {j+1}.")
-                            if fila_i["Máquina"] == fila_j["Máquina"]:
-                                errores.append(f"🛠️ Solapamiento máquina en filas {i+1} y {j+1}.")
+                    if conflictos_maquina or conflictos_operario:
+                        st.markdown(f"<div class='conflicto'>🚫 Conflicto en la máquina u operario asignado para {fila['ID_OP']} - {fila['Referencia']}.</div>", unsafe_allow_html=True)
+                    else:
+                        programacion_valida.append(ref_actual)
 
-                if errores:
-                    for e in errores:
-                        st.error(e)
-                    st.stop()
+                    referencias_seleccionadas.append(ref_actual)
 
-                if os.path.exists(programacion_path):
-                    df_existente = pd.read_csv(programacion_path)
-                else:
-                    df_existente = pd.DataFrame(columns=df_validado.columns)
-
-                df_nuevo = df_validado.copy()
-                df_nuevo["Hora_Inicio"] = df_nuevo["Hora_Inicio"].astype(str)
-                df_nuevo["Hora_Fin"] = df_nuevo["Hora_Fin"].astype(str)
-                df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                df_final.to_csv(programacion_path, index=False)
-                st.success("✅ Programación guardada.")
-                st.session_state.planificacion_definitiva.clear()
-                st.session_state.planificacion_tmp.clear()
+        if st.button("✅ Guardar programación"):
+            if not programacion_valida:
+                st.warning("⚠️ No hay asignaciones válidas para guardar. Revisa los conflictos marcados en rojo.")
+            else:
+                programacion_df = pd.concat([programacion_df, pd.DataFrame(programacion_valida)], ignore_index=True)
+                programacion_df.to_csv(programacion_path, index=False)
+                st.success("✅ Programación guardada exitosamente.")
+                systime.sleep(1)
                 st.rerun()
